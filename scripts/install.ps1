@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$repo = if ($env:CODEX_REPO) { $env:CODEX_REPO } else { "stellarlinkco/codex" }
+$repo = if ($env:CODEX_REPO) { $env:CODEX_REPO } else { "WufeiHalf/codex" }
 $installDir = if ($env:INSTALL_DIR) { $env:INSTALL_DIR } else { Join-Path $HOME ".local\\bin" }
 
 $baseUrl = if ($env:CODEX_BASE_URL) { $env:CODEX_BASE_URL.TrimEnd('/') } else { "https://github.com/$repo/releases/latest/download" }

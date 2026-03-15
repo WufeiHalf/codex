@@ -22,7 +22,6 @@ concurrency:
 
 jobs:
   tag-check:
-    if: ${{ github.repository == 'openai/codex' || github.repository == 'stellarlinkco/codex' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -392,7 +391,7 @@ jobs:
             codex-rs/dist/${{ matrix.target }}/*
 
   build-stellar:
-    if: ${{ github.repository == 'stellarlinkco/codex' }}
+    if: ${{ github.repository != 'openai/codex' }}
     needs: tag-check
     name: Build - ${{ matrix.runner }} - ${{ matrix.target }}${{ matrix.asset_suffix || '' }}
     runs-on: ${{ matrix.runner }}
@@ -712,6 +711,8 @@ jobs:
           commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"
           tag="${GITHUB_REF_NAME}"
           notes_path="${RUNNER_TEMP}/release-notes.md"
+          version="${tag#rust-v}"
+          version="${version#v}"
 
           match=""
           if [[ "${tag}" == rust-v* ]]; then
@@ -724,16 +725,31 @@ jobs:
           fi
 
           prev_tag="$(git describe --tags --match "${match}" --abbrev=0 "${commit}^" 2>/dev/null || true)"
+          custom_notes=""
+          for candidate in \
+            ".github/release-notes/${tag}.md" \
+            ".github/release-notes/v${version}.md"
+          do
+            if [[ -f "${candidate}" ]]; then
+              custom_notes="${candidate}"
+              break
+            fi
+          done
 
           {
-            echo "## Changes"
+            if [[ -n "${custom_notes}" ]]; then
+              cat "${custom_notes}"
+              echo
+            fi
+
+            echo "## 自动生成的提交 / Auto-generated commits"
             echo
             if [[ -n "${prev_tag}" ]]; then
-              echo "From \`${prev_tag}\` to \`${tag}\`"
+              echo "范围 / Range: \`${prev_tag}\` -> \`${tag}\`"
               echo
               git log --no-merges --pretty=format:'- %s (%h)' "${prev_tag}..${commit}"
             else
-              echo "Since initial release"
+              echo "范围 / Range: initial release -> \`${tag}\`"
               echo
               git log --no-merges --pretty=format:'- %s (%h)' "${commit}"
             fi
@@ -833,8 +849,8 @@ jobs:
 
       - name: Stage installer scripts
         run: |
-          cp scripts/install/install.sh dist/install.sh
-          cp scripts/install/install.ps1 dist/install.ps1
+          cp scripts/install.sh dist/install.sh
+          cp scripts/install.ps1 dist/install.ps1
 
       - name: Stage hodexctl scripts
         run: |

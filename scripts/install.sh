@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo="${CODEX_REPO:-stellarlinkco/codex}"
+repo="${CODEX_REPO:-WufeiHalf/codex}"
 install_dir="${INSTALL_DIR:-"$HOME/.local/bin"}"
 bin_name="codex"
 
