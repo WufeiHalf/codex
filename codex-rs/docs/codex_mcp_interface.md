@@ -18,6 +18,7 @@ At a glance:
   - `account/read`, `account/login/start`, `account/login/cancel`, `account/logout`, `account/rateLimits/read`
   - `config/read`, `config/value/write`, `config/batchWrite`
   - `model/list`, `app/list`, `collaborationMode/list`
+  - `codeSearch/symbol`, `codeSearch/definition`, `codeSearch/references`, `codeSearch/documentSymbol`
 - Remaining v1 compatibility RPCs
   - `getConversationSummary`
   - `getAuthStatus`
@@ -90,6 +91,17 @@ Fetch the built-in collaboration mode presets with `collaborationMode/list`. Thi
   - For tri-state fields like `reasoning_effort` and `developer_instructions`, omit the field to keep the current value, set it to `null` to clear it, or set a concrete value to update it.
 
 When sending `turn/start` with `collaborationMode`, `settings.developer_instructions: null` means "use built-in instructions for the selected mode".
+
+## Code search (experimental)
+
+Use the structured `codeSearch/*` RPCs for internal code navigation when `initialize.params.capabilities.experimentalApi = true` and the `internal_code_search` feature is enabled in config.
+
+- `codeSearch/symbol` accepts `{ query, roots }` and returns symbol matches with normalized document paths, optional ranges, symbol metadata, and `provenance`.
+- `codeSearch/definition` accepts a document `path` or `uri` plus a 1-indexed range and returns definition locations with `provenance`.
+- `codeSearch/references` accepts a document `path` or `uri` plus a 1-indexed range and returns reference locations with `provenance`.
+- `codeSearch/documentSymbol` accepts a document `path` or `uri` and returns flattened document symbols with optional `containerName`, `selectionRange`, and `provenance`.
+
+`provenance.backend` is one of `lsp`, `grepFallback`, `fileSearchFallback`, or `unavailable`. `provenance.language`, `provenance.resolutionSource`, and `provenance.installAttempted` record the lookup language, how Codex resolved the language server, and whether auto-install ran. Successful LSP lookups stay quiet; `warning` is used when Codex falls back because a language server is unavailable, fails at runtime, or fails to install.
 
 ## Event stream
 

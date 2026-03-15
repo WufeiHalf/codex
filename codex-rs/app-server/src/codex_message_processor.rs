@@ -33,6 +33,21 @@ use codex_app_server_protocol::CancelLoginAccountParams;
 use codex_app_server_protocol::CancelLoginAccountResponse;
 use codex_app_server_protocol::CancelLoginAccountStatus;
 use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::CodeSearchBackend as ApiCodeSearchBackend;
+use codex_app_server_protocol::CodeSearchDefinitionParams;
+use codex_app_server_protocol::CodeSearchDefinitionResponse;
+use codex_app_server_protocol::CodeSearchDocument;
+use codex_app_server_protocol::CodeSearchDocumentSymbolParams;
+use codex_app_server_protocol::CodeSearchDocumentSymbolResponse;
+use codex_app_server_protocol::CodeSearchDocumentSymbolResult;
+use codex_app_server_protocol::CodeSearchLocation;
+use codex_app_server_protocol::CodeSearchLocationResult;
+use codex_app_server_protocol::CodeSearchProvenance;
+use codex_app_server_protocol::CodeSearchReferencesParams;
+use codex_app_server_protocol::CodeSearchReferencesResponse;
+use codex_app_server_protocol::CodeSearchSymbolMatch;
+use codex_app_server_protocol::CodeSearchSymbolParams;
+use codex_app_server_protocol::CodeSearchSymbolResponse;
 use codex_app_server_protocol::CollaborationModeListParams;
 use codex_app_server_protocol::CollaborationModeListResponse;
 use codex_app_server_protocol::CommandExecParams;
@@ -188,6 +203,7 @@ use codex_core::auth::AuthMode as CoreAuthMode;
 use codex_core::auth::CLIENT_ID;
 use codex_core::auth::login_with_api_key;
 use codex_core::auth::login_with_chatgpt_auth_tokens;
+use codex_core::code_search as core_code_search;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
 use codex_core::config::NetworkProxyAuditMetadata;
@@ -704,6 +720,22 @@ impl CodexMessageProcessor {
             }
             ClientRequest::AppsList { request_id, params } => {
                 self.apps_list(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::CodeSearchSymbol { request_id, params } => {
+                self.code_search_symbol(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::CodeSearchDefinition { request_id, params } => {
+                self.code_search_definition(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::CodeSearchReferences { request_id, params } => {
+                self.code_search_references(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::CodeSearchDocumentSymbol { request_id, params } => {
+                self.code_search_document_symbol(to_connection_request_id(request_id), params)
                     .await;
             }
             ClientRequest::SkillsConfigWrite { request_id, params } => {
@@ -5054,6 +5086,246 @@ impl CodexMessageProcessor {
         }
     }
 
+    async fn code_search_symbol(
+        &self,
+        request_id: ConnectionRequestId,
+        params: CodeSearchSymbolParams,
+    ) {
+        let config = match self.load_latest_config(Some(self.config.cwd.clone())).await {
+            Ok(config) => config,
+            Err(error) => {
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+
+        if !config.features.enabled(Feature::InternalCodeSearch) {
+            self.send_invalid_request_error(
+                request_id,
+                "internal code search is disabled".to_string(),
+            )
+            .await;
+            return;
+        }
+
+        let roots = match resolve_code_search_roots(&config.cwd, params.roots) {
+            Ok(roots) => roots,
+            Err(error) => {
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+
+        match core_code_search::find_symbols(
+            &config,
+            core_code_search::SymbolSearchParams {
+                query: params.query,
+                cwd: config.cwd.clone(),
+                roots,
+                language_hint: None,
+                limit: 50,
+            },
+        )
+        .await
+        {
+            Ok(outcome) => {
+                self.outgoing
+                    .send_response(request_id, map_symbol_search_response(outcome))
+                    .await;
+            }
+            Err(error) => {
+                self.outgoing
+                    .send_error(request_id, map_code_search_error(error))
+                    .await;
+            }
+        }
+    }
+
+    async fn code_search_definition(
+        &self,
+        request_id: ConnectionRequestId,
+        params: CodeSearchDefinitionParams,
+    ) {
+        let config = match self.load_latest_config(Some(self.config.cwd.clone())).await {
+            Ok(config) => config,
+            Err(error) => {
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+
+        if !config.features.enabled(Feature::InternalCodeSearch) {
+            self.send_invalid_request_error(
+                request_id,
+                "internal code search is disabled".to_string(),
+            )
+            .await;
+            return;
+        }
+
+        let path = match resolve_code_search_request_path(&config.cwd, params.path, params.uri) {
+            Ok(path) => path,
+            Err(error) => {
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+        let position = match validate_code_search_lookup_position(
+            params.start_line,
+            params.start_column,
+            params.end_line,
+            params.end_column,
+        ) {
+            Ok(position) => position,
+            Err(error) => {
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+
+        match core_code_search::find_definitions(
+            &config,
+            core_code_search::DefinitionSearchParams {
+                path,
+                position,
+                cwd: config.cwd.clone(),
+                roots: Vec::new(),
+            },
+        )
+        .await
+        {
+            Ok(outcome) => {
+                self.outgoing
+                    .send_response(request_id, map_definition_response(outcome))
+                    .await;
+            }
+            Err(error) => {
+                self.outgoing
+                    .send_error(request_id, map_code_search_error(error))
+                    .await;
+            }
+        }
+    }
+
+    async fn code_search_references(
+        &self,
+        request_id: ConnectionRequestId,
+        params: CodeSearchReferencesParams,
+    ) {
+        let config = match self.load_latest_config(Some(self.config.cwd.clone())).await {
+            Ok(config) => config,
+            Err(error) => {
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+
+        if !config.features.enabled(Feature::InternalCodeSearch) {
+            self.send_invalid_request_error(
+                request_id,
+                "internal code search is disabled".to_string(),
+            )
+            .await;
+            return;
+        }
+
+        let path = match resolve_code_search_request_path(&config.cwd, params.path, params.uri) {
+            Ok(path) => path,
+            Err(error) => {
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+        let position = match validate_code_search_lookup_position(
+            params.start_line,
+            params.start_column,
+            params.end_line,
+            params.end_column,
+        ) {
+            Ok(position) => position,
+            Err(error) => {
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+
+        match core_code_search::find_references(
+            &config,
+            core_code_search::ReferencesSearchParams {
+                path,
+                position,
+                cwd: config.cwd.clone(),
+                roots: Vec::new(),
+                include_declaration: true,
+            },
+        )
+        .await
+        {
+            Ok(outcome) => {
+                self.outgoing
+                    .send_response(request_id, map_references_response(outcome))
+                    .await;
+            }
+            Err(error) => {
+                self.outgoing
+                    .send_error(request_id, map_code_search_error(error))
+                    .await;
+            }
+        }
+    }
+
+    async fn code_search_document_symbol(
+        &self,
+        request_id: ConnectionRequestId,
+        params: CodeSearchDocumentSymbolParams,
+    ) {
+        let config = match self.load_latest_config(Some(self.config.cwd.clone())).await {
+            Ok(config) => config,
+            Err(error) => {
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+
+        if !config.features.enabled(Feature::InternalCodeSearch) {
+            self.send_invalid_request_error(
+                request_id,
+                "internal code search is disabled".to_string(),
+            )
+            .await;
+            return;
+        }
+
+        let path = match resolve_code_search_request_path(&config.cwd, params.path, params.uri) {
+            Ok(path) => path,
+            Err(error) => {
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+
+        match core_code_search::document_symbols(
+            &config,
+            core_code_search::DocumentSymbolsParams {
+                path: path.clone(),
+                cwd: config.cwd.clone(),
+            },
+        )
+        .await
+        {
+            Ok(outcome) => {
+                self.outgoing
+                    .send_response(request_id, map_document_symbol_response(&path, outcome))
+                    .await;
+            }
+            Err(error) => {
+                self.outgoing
+                    .send_error(request_id, map_code_search_error(error))
+                    .await;
+            }
+        }
+    }
+
     fn merge_loaded_apps(
         all_connectors: Option<&[AppInfo]>,
         accessible_connectors: Option<&[AppInfo]>,
@@ -7127,6 +7399,423 @@ fn errors_to_info(
         .collect()
 }
 
+fn resolve_code_search_roots(
+    cwd: &Path,
+    roots: Vec<String>,
+) -> Result<Vec<PathBuf>, JSONRPCErrorError> {
+    let workspace_root = canonicalize_code_search_workspace(cwd)?;
+
+    roots
+        .into_iter()
+        .map(|root| {
+            let trimmed = root.trim();
+            if trimmed.is_empty() {
+                return Err(JSONRPCErrorError {
+                    code: INVALID_REQUEST_ERROR_CODE,
+                    message: "code search roots must not contain empty paths".to_string(),
+                    data: None,
+                });
+            }
+
+            let root = PathBuf::from(trimmed);
+            let resolved = if root.is_absolute() {
+                root
+            } else {
+                cwd.join(root)
+            };
+            ensure_code_search_path_in_workspace(&workspace_root, resolved, "code search root")
+        })
+        .collect()
+}
+
+fn resolve_code_search_request_path(
+    cwd: &Path,
+    path: Option<String>,
+    uri: Option<String>,
+) -> Result<PathBuf, JSONRPCErrorError> {
+    let workspace_root = canonicalize_code_search_workspace(cwd)?;
+
+    match (path.as_deref(), uri.as_deref()) {
+        (Some(_), Some(_)) => Err(JSONRPCErrorError {
+            code: INVALID_REQUEST_ERROR_CODE,
+            message: "provide either path or uri, not both".to_string(),
+            data: None,
+        }),
+        (None, None) => Err(JSONRPCErrorError {
+            code: INVALID_REQUEST_ERROR_CODE,
+            message: "code search requests require either path or uri".to_string(),
+            data: None,
+        }),
+        (Some(path), None) => {
+            let trimmed = path.trim();
+            if trimmed.is_empty() {
+                return Err(JSONRPCErrorError {
+                    code: INVALID_REQUEST_ERROR_CODE,
+                    message: "path must not be empty".to_string(),
+                    data: None,
+                });
+            }
+
+            let path = PathBuf::from(trimmed);
+            let resolved = if path.is_absolute() {
+                path
+            } else {
+                cwd.join(path)
+            };
+            ensure_code_search_path_in_workspace(&workspace_root, resolved, "code search path")
+        }
+        (None, Some(uri)) => {
+            let path = file_uri_to_path(uri)?;
+            ensure_code_search_path_in_workspace(&workspace_root, path, "code search path")
+        }
+    }
+}
+
+fn file_uri_to_path(uri: &str) -> Result<PathBuf, JSONRPCErrorError> {
+    let Some(rest) = uri.strip_prefix("file://") else {
+        return Err(JSONRPCErrorError {
+            code: INVALID_REQUEST_ERROR_CODE,
+            message: format!("unsupported code search uri `{uri}`"),
+            data: None,
+        });
+    };
+
+    if rest.is_empty() {
+        return Err(JSONRPCErrorError {
+            code: INVALID_REQUEST_ERROR_CODE,
+            message: "code search uri must not be empty".to_string(),
+            data: None,
+        });
+    }
+
+    if rest.contains(['?', '#']) {
+        return Err(JSONRPCErrorError {
+            code: INVALID_REQUEST_ERROR_CODE,
+            message: format!("unsupported code search uri `{uri}`"),
+            data: None,
+        });
+    }
+
+    let absolute_path = if rest.starts_with('/') {
+        rest
+    } else {
+        let Some((authority, _path)) = rest.split_once('/') else {
+            return Err(JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: format!("unsupported code search uri `{uri}`"),
+                data: None,
+            });
+        };
+        if authority != "localhost" {
+            return Err(JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: format!("unsupported code search uri `{uri}`"),
+                data: None,
+            });
+        }
+        &rest[authority.len()..]
+    };
+
+    if absolute_path.is_empty() || !absolute_path.starts_with('/') {
+        return Err(JSONRPCErrorError {
+            code: INVALID_REQUEST_ERROR_CODE,
+            message: format!("unsupported code search uri `{uri}`"),
+            data: None,
+        });
+    }
+
+    #[cfg(windows)]
+    let path = {
+        let normalized = absolute_path.strip_prefix('/').unwrap_or(absolute_path);
+        PathBuf::from(percent_decode_file_uri_path(normalized)?.replace('/', "\\"))
+    };
+
+    #[cfg(not(windows))]
+    let path = { PathBuf::from(percent_decode_file_uri_path(absolute_path)?) };
+
+    Ok(path)
+}
+
+fn percent_decode_file_uri_path(path: &str) -> Result<String, JSONRPCErrorError> {
+    let bytes = path.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+
+    while index < bytes.len() {
+        if bytes[index] != b'%' {
+            decoded.push(bytes[index]);
+            index += 1;
+            continue;
+        }
+
+        if index + 2 >= bytes.len() {
+            return Err(invalid_code_search_file_uri(path));
+        }
+
+        let Some(high) = hex_value(bytes[index + 1]) else {
+            return Err(invalid_code_search_file_uri(path));
+        };
+        let Some(low) = hex_value(bytes[index + 2]) else {
+            return Err(invalid_code_search_file_uri(path));
+        };
+
+        decoded.push((high << 4) | low);
+        index += 3;
+    }
+
+    String::from_utf8(decoded).map_err(|_| invalid_code_search_file_uri(path))
+}
+
+fn hex_value(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn invalid_code_search_file_uri(path: &str) -> JSONRPCErrorError {
+    JSONRPCErrorError {
+        code: INVALID_REQUEST_ERROR_CODE,
+        message: format!("unsupported code search uri `file://{path}`"),
+        data: None,
+    }
+}
+
+fn canonicalize_code_search_workspace(cwd: &Path) -> Result<PathBuf, JSONRPCErrorError> {
+    std::fs::canonicalize(cwd).map_err(|err| JSONRPCErrorError {
+        code: INTERNAL_ERROR_CODE,
+        message: format!("failed to resolve code search workspace: {err}"),
+        data: None,
+    })
+}
+
+fn ensure_code_search_path_in_workspace(
+    workspace_root: &Path,
+    path: PathBuf,
+    label: &str,
+) -> Result<PathBuf, JSONRPCErrorError> {
+    let canonical_path = std::fs::canonicalize(&path).map_err(|err| JSONRPCErrorError {
+        code: INVALID_REQUEST_ERROR_CODE,
+        message: format!(
+            "{label} `{}` must exist within the current workspace: {err}",
+            path.display()
+        ),
+        data: None,
+    })?;
+
+    if canonical_path.starts_with(workspace_root) {
+        Ok(canonical_path)
+    } else {
+        Err(JSONRPCErrorError {
+            code: INVALID_REQUEST_ERROR_CODE,
+            message: format!(
+                "{label} `{}` must be within the current workspace",
+                path.display()
+            ),
+            data: None,
+        })
+    }
+}
+
+fn validate_code_search_lookup_position(
+    start_line: usize,
+    start_column: usize,
+    end_line: usize,
+    end_column: usize,
+) -> Result<codex_app_server_protocol::TextPosition, JSONRPCErrorError> {
+    if start_line == 0 || start_column == 0 || end_line == 0 || end_column == 0 {
+        return Err(JSONRPCErrorError {
+            code: INVALID_REQUEST_ERROR_CODE,
+            message: "code search positions must be 1-indexed values greater than zero".to_string(),
+            data: None,
+        });
+    }
+
+    if (end_line, end_column) < (start_line, start_column) {
+        return Err(JSONRPCErrorError {
+            code: INVALID_REQUEST_ERROR_CODE,
+            message: "code search end position must not precede start position".to_string(),
+            data: None,
+        });
+    }
+
+    Ok(codex_app_server_protocol::TextPosition {
+        line: start_line,
+        column: start_column,
+    })
+}
+
+fn map_code_search_error(error: core_code_search::CodeSearchError) -> JSONRPCErrorError {
+    match error {
+        core_code_search::CodeSearchError::InvalidRequest(message) => JSONRPCErrorError {
+            code: INVALID_REQUEST_ERROR_CODE,
+            message,
+            data: None,
+        },
+        core_code_search::CodeSearchError::ReadFile { path, source } => JSONRPCErrorError {
+            code: INVALID_REQUEST_ERROR_CODE,
+            message: format!("failed to read `{}`: {source}", path.display()),
+            data: None,
+        },
+        core_code_search::CodeSearchError::InvalidPosition { path, line, column } => {
+            JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: format!(
+                    "invalid text position {line}:{column} for `{}`",
+                    path.display()
+                ),
+                data: None,
+            }
+        }
+        core_code_search::CodeSearchError::OperationFailed(message) => JSONRPCErrorError {
+            code: INTERNAL_ERROR_CODE,
+            message: format!("internal code search failed: {message}"),
+            data: None,
+        },
+    }
+}
+
+fn map_code_search_backend(backend: core_code_search::CodeSearchBackend) -> ApiCodeSearchBackend {
+    match backend {
+        core_code_search::CodeSearchBackend::Lsp => ApiCodeSearchBackend::Lsp,
+        core_code_search::CodeSearchBackend::GrepFallback => ApiCodeSearchBackend::GrepFallback,
+        core_code_search::CodeSearchBackend::FileSearchFallback => {
+            ApiCodeSearchBackend::FileSearchFallback
+        }
+        core_code_search::CodeSearchBackend::Unavailable => ApiCodeSearchBackend::Unavailable,
+    }
+}
+
+fn map_code_search_provenance<T>(
+    outcome: &core_code_search::CodeSearchOutcome<T>,
+) -> CodeSearchProvenance {
+    CodeSearchProvenance {
+        backend: map_code_search_backend(outcome.backend),
+        provider: outcome.provider.clone(),
+        language: outcome.trace.language.clone(),
+        resolution_source: outcome.trace.resolution_source.clone(),
+        install_attempted: outcome.trace.install_attempted,
+    }
+}
+
+fn map_code_search_document(path: &Path) -> CodeSearchDocument {
+    CodeSearchDocument {
+        path: Some(path.display().to_string()),
+        uri: None,
+    }
+}
+
+fn map_code_search_location(location: core_code_search::CodeSearchLocation) -> CodeSearchLocation {
+    CodeSearchLocation {
+        document: map_code_search_document(&location.path),
+        range: Some(location.range),
+    }
+}
+
+fn map_symbol_search_response(
+    outcome: core_code_search::CodeSearchOutcome<core_code_search::CodeSearchSymbol>,
+) -> CodeSearchSymbolResponse {
+    let provenance = map_code_search_provenance(&outcome);
+    CodeSearchSymbolResponse {
+        matches: outcome
+            .data
+            .into_iter()
+            .map(|symbol| CodeSearchSymbolMatch {
+                name: symbol.name,
+                kind: symbol.kind,
+                container_name: symbol.container_name,
+                detail: None,
+                location: CodeSearchLocation {
+                    document: map_code_search_document(&symbol.path),
+                    range: symbol.range,
+                },
+            })
+            .collect(),
+        provenance,
+        notice: outcome.notices.info_message,
+        warning: outcome.notices.warning_message,
+    }
+}
+
+fn map_definition_response(
+    outcome: core_code_search::CodeSearchOutcome<core_code_search::CodeSearchLocation>,
+) -> CodeSearchDefinitionResponse {
+    let provenance = map_code_search_provenance(&outcome);
+    CodeSearchDefinitionResponse {
+        locations: outcome
+            .data
+            .into_iter()
+            .map(|location| CodeSearchLocationResult {
+                name: None,
+                kind: None,
+                location: map_code_search_location(location),
+            })
+            .collect(),
+        provenance,
+        notice: outcome.notices.info_message,
+        warning: outcome.notices.warning_message,
+    }
+}
+
+fn map_references_response(
+    outcome: core_code_search::CodeSearchOutcome<core_code_search::CodeSearchLocation>,
+) -> CodeSearchReferencesResponse {
+    let provenance = map_code_search_provenance(&outcome);
+    CodeSearchReferencesResponse {
+        locations: outcome
+            .data
+            .into_iter()
+            .map(|location| CodeSearchLocationResult {
+                name: None,
+                kind: None,
+                location: map_code_search_location(location),
+            })
+            .collect(),
+        provenance,
+        notice: outcome.notices.info_message,
+        warning: outcome.notices.warning_message,
+    }
+}
+
+fn map_document_symbol_response(
+    path: &Path,
+    outcome: core_code_search::CodeSearchOutcome<core_code_search::CodeSearchDocumentSymbol>,
+) -> CodeSearchDocumentSymbolResponse {
+    let provenance = map_code_search_provenance(&outcome);
+    let mut symbols = Vec::new();
+    flatten_document_symbols(&mut symbols, None, path, outcome.data);
+    CodeSearchDocumentSymbolResponse {
+        symbols,
+        provenance,
+        notice: outcome.notices.info_message,
+        warning: outcome.notices.warning_message,
+    }
+}
+
+fn flatten_document_symbols(
+    flattened: &mut Vec<CodeSearchDocumentSymbolResult>,
+    container_name: Option<String>,
+    path: &Path,
+    symbols: Vec<core_code_search::CodeSearchDocumentSymbol>,
+) {
+    for symbol in symbols {
+        flattened.push(CodeSearchDocumentSymbolResult {
+            name: symbol.name.clone(),
+            kind: symbol.kind.clone(),
+            detail: symbol.detail.clone(),
+            container_name: container_name.clone(),
+            location: CodeSearchLocation {
+                document: map_code_search_document(path),
+                range: Some(symbol.range.clone()),
+            },
+            selection_range: Some(symbol.selection_range.clone()),
+        });
+        flatten_document_symbols(flattened, Some(symbol.name), path, symbol.children);
+    }
+}
+
 fn validate_dynamic_tools(tools: &[ApiDynamicToolSpec]) -> Result<(), String> {
     let mut seen = HashSet::new();
     for tool in tools {
@@ -7760,6 +8449,79 @@ mod tests {
             input_schema: json!({"properties": {}}),
         }];
         validate_dynamic_tools(&tools).expect("valid schema");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn file_uri_to_path_decodes_percent_encoded_unix_paths() {
+        assert_eq!(
+            file_uri_to_path("file:///tmp/dir%20name/lib.rs").expect("decode file uri"),
+            PathBuf::from("/tmp/dir name/lib.rs")
+        );
+    }
+
+    #[test]
+    fn file_uri_to_path_rejects_invalid_percent_encoding() {
+        let err = file_uri_to_path("file:///tmp/bad%2").expect_err("invalid uri should fail");
+
+        assert_eq!(err.code, INVALID_REQUEST_ERROR_CODE);
+        assert_eq!(
+            err.message,
+            "unsupported code search uri `file:///tmp/bad%2`"
+        );
+    }
+
+    #[test]
+    fn file_uri_to_path_rejects_non_local_authority() {
+        let err = file_uri_to_path("file://evil/tmp/a.rs").expect_err("authority should fail");
+
+        assert_eq!(err.code, INVALID_REQUEST_ERROR_CODE);
+        assert_eq!(
+            err.message,
+            "unsupported code search uri `file://evil/tmp/a.rs`"
+        );
+    }
+
+    #[test]
+    fn file_uri_to_path_rejects_missing_localhost_path() {
+        let err = file_uri_to_path("file://localhost").expect_err("missing path should fail");
+
+        assert_eq!(err.code, INVALID_REQUEST_ERROR_CODE);
+        assert_eq!(
+            err.message,
+            "unsupported code search uri `file://localhost`"
+        );
+    }
+
+    #[test]
+    fn resolve_code_search_request_path_rejects_paths_outside_workspace() {
+        let workspace = TempDir::new().expect("workspace temp dir");
+        let outside = TempDir::new().expect("outside temp dir");
+        let outside_path = outside.path().join("lib.rs");
+        std::fs::write(&outside_path, "pub struct Widget;\n").expect("write outside file");
+
+        let err = resolve_code_search_request_path(
+            workspace.path(),
+            Some(outside_path.display().to_string()),
+            None,
+        )
+        .expect_err("outside path should fail");
+
+        assert_eq!(err.code, INVALID_REQUEST_ERROR_CODE);
+        assert!(err.message.contains("must be within the current workspace"));
+    }
+
+    #[test]
+    fn resolve_code_search_roots_rejects_roots_outside_workspace() {
+        let workspace = TempDir::new().expect("workspace temp dir");
+        let outside = TempDir::new().expect("outside temp dir");
+
+        let err =
+            resolve_code_search_roots(workspace.path(), vec![outside.path().display().to_string()])
+                .expect_err("outside root should fail");
+
+        assert_eq!(err.code, INVALID_REQUEST_ERROR_CODE);
+        assert!(err.message.contains("must be within the current workspace"));
     }
 
     #[test]

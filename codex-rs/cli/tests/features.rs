@@ -29,6 +29,50 @@ async fn features_enable_writes_feature_flag_to_config() -> Result<()> {
 }
 
 #[tokio::test]
+async fn features_enable_internal_code_search_seeds_runtime_defaults() -> Result<()> {
+    let codex_home = TempDir::new()?;
+
+    let mut cmd = codex_command(codex_home.path())?;
+    cmd.args(["features", "enable", "internal_code_search"])
+        .assert()
+        .success()
+        .stdout(contains(
+            "Enabled feature `internal_code_search` in config.toml.",
+        ));
+
+    let config = std::fs::read_to_string(codex_home.path().join("config.toml"))?;
+    assert!(config.contains("[features]"));
+    assert!(config.contains("internal_code_search = true"));
+    assert!(config.contains("[code_search]"));
+    assert!(config.contains("enabled = true"));
+    assert!(config.contains("auto_detect = true"));
+    assert!(config.contains("auto_install = false"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn features_enable_internal_code_search_preserves_existing_runtime_config() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    std::fs::write(
+        codex_home.path().join("config.toml"),
+        "[code_search]\nauto_detect = false\n",
+    )?;
+
+    let mut cmd = codex_command(codex_home.path())?;
+    cmd.args(["features", "enable", "internal_code_search"])
+        .assert()
+        .success();
+
+    let config = std::fs::read_to_string(codex_home.path().join("config.toml"))?;
+    assert!(config.contains("internal_code_search = true"));
+    assert!(config.contains("auto_detect = false"));
+    assert!(!config.contains("enabled = true"));
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn features_disable_writes_feature_flag_to_config() -> Result<()> {
     let codex_home = TempDir::new()?;
 

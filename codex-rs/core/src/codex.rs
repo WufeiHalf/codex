@@ -3930,6 +3930,19 @@ impl Session {
         state.record_mcp_dependency_prompted(names);
     }
 
+    pub(crate) async fn code_search_notified(&self) -> HashSet<String> {
+        let state = self.state.lock().await;
+        state.code_search_notified()
+    }
+
+    pub(crate) async fn record_code_search_notified<I>(&self, keys: I)
+    where
+        I: IntoIterator<Item = String>,
+    {
+        let mut state = self.state.lock().await;
+        state.record_code_search_notified(keys);
+    }
+
     pub async fn dependency_env(&self) -> HashMap<String, String> {
         let state = self.state.lock().await;
         state.dependency_env()

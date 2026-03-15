@@ -164,3 +164,26 @@ These guidelines apply to app-server protocol work in `codex-rs`, especially:
 - Experimental GitHub-triggered orchestration guidance lives in `docs/github-outcome-first-overlay.md`.
 - There is intentionally no active root `WORKFLOW.md` contract for GitHub orchestration in this repository yet.
 - Do not assume the experimental overlay describes current native `codex github` behavior unless the current session explicitly instructs the agent to use that overlay and references `docs/github-outcome-first-overlay.md`, or a higher-level orchestrator/runtime explicitly activates it with an equivalent instruction.
+
+
+## Internal Code Search / LSP Follow-Ups
+
+- Keep `internal_code_search` as the product-level gate. Put follow-up runtime controls under `[code_search]` instead of inventing another top-level toggle.
+- For LSP auto-install follow-ups, preserve this resolution order unless the task explicitly changes it:
+  1. `[code_search.lsp.<language>].command`
+  2. Codex-managed installed server path
+  3. PATH-detected default command
+  4. `[code_search].auto_install`
+  5. Existing fallback search
+- Do not silently replace a broken explicit command with a different auto-installed server. Warn and fall back instead.
+- Successful LSP-backed lookups should feel like the default path. Prefer quiet success plus structured tracing, and reserve visible notices for fallback, install failure, or runtime failure.
+- When asked to align UX with OpenCode LSP behavior, borrow the interaction principles from `https://opencode.ai/docs/lsp/` rather than copying its entire config surface blindly.
+
+## LSP Regression Workflow
+
+- Prefer the `lsp-regression` skill when the task is to validate internal code search or LSP end to end.
+- Before every LSP-related packaged build, delete `/Users/wufei/.local/bin/codex-fork`, remove the repository-root `out=` artifact directory if it exists, remove `CODEX_HOME/lsp` for the validation home (for example `~/.codex-fork/lsp`), and clean `codex-rs/target`.
+- Do not start the release build unless the machine has at least 15 GiB of free disk space after cleanup. If available space is below the threshold, stop and clean more before continuing.
+- For packaged validation, install from the repo root with `OUT=/Users/wufei/.local/bin/codex-fork make release-codex` or `just release-codex out="/Users/wufei/.local/bin/codex-fork"`.
+- Run the packaged binary with `CODEX_HOME="$HOME/.codex-fork"` and configuration from `~/.codex-fork/config.toml`.
+- LSP work is not complete until a real agent uses LSP to retrieve code successfully and the resulting logs or structured output confirm `backend=lsp`.

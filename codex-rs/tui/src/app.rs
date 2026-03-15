@@ -48,6 +48,7 @@ use codex_core::config::ConfigBuilder;
 use codex_core::config::ConfigOverrides;
 use codex_core::config::edit::ConfigEdit;
 use codex_core::config::edit::ConfigEditsBuilder;
+use codex_core::config::edit::code_search_defaults_missing;
 use codex_core::config::types::ModelAvailabilityNuxConfig;
 use codex_core::config_loader::ConfigLayerStackOrdering;
 use codex_core::features::Feature;
@@ -839,6 +840,19 @@ impl App {
                 Feature::WindowsSandbox | Feature::WindowsSandboxElevated
             )
         });
+        let should_seed_code_search_defaults = updates
+            .iter()
+            .any(|(feature, enabled)| *feature == Feature::InternalCodeSearch && *enabled)
+            && match code_search_defaults_missing(&self.config.codex_home) {
+                Ok(missing) => missing,
+                Err(err) => {
+                    tracing::error!(error = %err, "failed to inspect code-search config defaults");
+                    self.chat_widget.add_error_message(format!(
+                        "Failed to inspect code-search config defaults: {err}"
+                    ));
+                    false
+                }
+            };
         let mut builder = ConfigEditsBuilder::new(&self.config.codex_home)
             .with_profile(self.active_profile.as_deref());
 
@@ -870,6 +884,13 @@ impl App {
                     segments: vec!["features".to_string(), feature_key.to_string()],
                 }]);
             }
+        }
+
+        if should_seed_code_search_defaults {
+            builder = builder
+                .set_code_search_enabled(true)
+                .set_code_search_auto_detect(true)
+                .set_code_search_auto_install(false);
         }
 
         if windows_sandbox_changed {
@@ -5893,6 +5914,26 @@ mod tests {
             app_enabled_in_effective_config(&app.config, &app_id),
             Some(false)
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn update_feature_flags_seeds_code_search_runtime_defaults() -> Result<()> {
+        let mut app = make_test_app().await;
+        let codex_home = tempdir()?;
+        app.config.codex_home = codex_home.path().to_path_buf();
+
+        app.update_feature_flags(vec![(Feature::InternalCodeSearch, true)])
+            .await;
+
+        let config = std::fs::read_to_string(codex_home.path().join("config.toml"))?;
+        assert!(config.contains("[features]"));
+        assert!(config.contains("internal_code_search = true"));
+        assert!(config.contains("[code_search]"));
+        assert!(config.contains("enabled = true"));
+        assert!(config.contains("auto_detect = true"));
+        assert!(config.contains("auto_install = false"));
+
         Ok(())
     }
 

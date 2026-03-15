@@ -155,6 +155,8 @@ pub enum Feature {
     Personality,
     /// Enable native artifact tools.
     Artifact,
+    /// Enable internal code-search tools and app-server routes.
+    InternalCodeSearch,
     /// Enable Fast mode selection in the TUI and request layer.
     FastMode,
     /// Enable voice transcription in the TUI composer.
@@ -726,6 +728,16 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
+        id: Feature::InternalCodeSearch,
+        key: "internal_code_search",
+        stage: Stage::Experimental {
+            name: "Internal code search",
+            menu_description: "Enable built-in symbol-aware code navigation backed by local language servers with fallback to existing search tools.",
+            announcement: "NEW: Internal code search is now available in /experimental. Enable it to try symbol, definition, and reference lookup with graceful fallback when language servers are unavailable.",
+        },
+        default_enabled: false,
+    },
+    FeatureSpec {
         id: Feature::FastMode,
         key: "fast_mode",
         stage: Stage::UnderDevelopment,
@@ -915,6 +927,22 @@ mod tests {
     fn image_generation_is_under_development() {
         assert_eq!(Feature::ImageGeneration.stage(), Stage::UnderDevelopment);
         assert_eq!(Feature::ImageGeneration.default_enabled(), false);
+    }
+
+    #[test]
+    fn internal_code_search_is_experimental_and_user_toggleable() {
+        let spec = Feature::InternalCodeSearch.info();
+        let stage = spec.stage;
+
+        assert!(matches!(stage, Stage::Experimental { .. }));
+        assert_eq!(stage.experimental_menu_name(), Some("Internal code search"));
+        assert_eq!(
+            stage.experimental_menu_description(),
+            Some(
+                "Enable built-in symbol-aware code navigation backed by local language servers with fallback to existing search tools."
+            )
+        );
+        assert_eq!(Feature::InternalCodeSearch.default_enabled(), false);
     }
 
     #[test]

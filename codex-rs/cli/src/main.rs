@@ -48,7 +48,9 @@ use crate::mcp_cmd::McpCli;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
 use codex_core::config::edit::ConfigEditsBuilder;
+use codex_core::config::edit::code_search_defaults_missing;
 use codex_core::config::find_codex_home;
+use codex_core::features::Feature;
 use codex_core::features::Stage;
 use codex_core::features::is_known_feature_key;
 use codex_core::terminal::TerminalName;
@@ -851,11 +853,16 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
 async fn enable_feature_in_config(interactive: &TuiCli, feature: &str) -> anyhow::Result<()> {
     FeatureToggles::validate_feature(feature)?;
     let codex_home = find_codex_home()?;
-    ConfigEditsBuilder::new(&codex_home)
+    let mut builder = ConfigEditsBuilder::new(&codex_home)
         .with_profile(interactive.config_profile.as_deref())
-        .set_feature_enabled(feature, true)
-        .apply()
-        .await?;
+        .set_feature_enabled(feature, true);
+    if feature == Feature::InternalCodeSearch.key() && code_search_defaults_missing(&codex_home)? {
+        builder = builder
+            .set_code_search_enabled(true)
+            .set_code_search_auto_detect(true)
+            .set_code_search_auto_install(false);
+    }
+    builder.apply().await?;
     println!("Enabled feature `{feature}` in config.toml.");
     maybe_print_under_development_feature_warning(&codex_home, interactive, feature);
     Ok(())

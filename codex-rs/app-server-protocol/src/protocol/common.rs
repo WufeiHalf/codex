@@ -458,6 +458,26 @@ client_request_definitions! {
         params: v2::GetAccountParams,
         response: v2::GetAccountResponse,
     },
+    #[experimental("codeSearch/symbol")]
+    CodeSearchSymbol => "codeSearch/symbol" {
+        params: v2::CodeSearchSymbolParams,
+        response: v2::CodeSearchSymbolResponse,
+    },
+    #[experimental("codeSearch/definition")]
+    CodeSearchDefinition => "codeSearch/definition" {
+        params: v2::CodeSearchDefinitionParams,
+        response: v2::CodeSearchDefinitionResponse,
+    },
+    #[experimental("codeSearch/references")]
+    CodeSearchReferences => "codeSearch/references" {
+        params: v2::CodeSearchReferencesParams,
+        response: v2::CodeSearchReferencesResponse,
+    },
+    #[experimental("codeSearch/documentSymbol")]
+    CodeSearchDocumentSymbol => "codeSearch/documentSymbol" {
+        params: v2::CodeSearchDocumentSymbolParams,
+        response: v2::CodeSearchDocumentSymbolResponse,
+    },
 
     /// DEPRECATED APIs below
     GetConversationSummary {
@@ -1416,6 +1436,107 @@ mod tests {
     }
 
     #[test]
+    fn serialize_code_search_requests() -> Result<()> {
+        let cases = vec![
+            (
+                ClientRequest::CodeSearchSymbol {
+                    request_id: RequestId::Integer(9),
+                    params: v2::CodeSearchSymbolParams {
+                        query: "CodeSearchSymbol".to_string(),
+                        roots: vec!["/repo".to_string()],
+                    },
+                },
+                json!({
+                    "method": "codeSearch/symbol",
+                    "id": 9,
+                    "params": {
+                        "query": "CodeSearchSymbol",
+                        "roots": ["/repo"]
+                    }
+                }),
+                "codeSearch/symbol",
+            ),
+            (
+                ClientRequest::CodeSearchDefinition {
+                    request_id: RequestId::Integer(10),
+                    params: v2::CodeSearchDefinitionParams {
+                        path: Some("src/lib.rs".to_string()),
+                        uri: None,
+                        start_line: 10,
+                        start_column: 5,
+                        end_line: 10,
+                        end_column: 11,
+                    },
+                },
+                json!({
+                    "method": "codeSearch/definition",
+                    "id": 10,
+                    "params": {
+                        "path": "src/lib.rs",
+                        "uri": null,
+                        "startLine": 10,
+                        "startColumn": 5,
+                        "endLine": 10,
+                        "endColumn": 11
+                    }
+                }),
+                "codeSearch/definition",
+            ),
+            (
+                ClientRequest::CodeSearchReferences {
+                    request_id: RequestId::Integer(11),
+                    params: v2::CodeSearchReferencesParams {
+                        path: Some("src/lib.rs".to_string()),
+                        uri: None,
+                        start_line: 10,
+                        start_column: 5,
+                        end_line: 10,
+                        end_column: 11,
+                    },
+                },
+                json!({
+                    "method": "codeSearch/references",
+                    "id": 11,
+                    "params": {
+                        "path": "src/lib.rs",
+                        "uri": null,
+                        "startLine": 10,
+                        "startColumn": 5,
+                        "endLine": 10,
+                        "endColumn": 11
+                    }
+                }),
+                "codeSearch/references",
+            ),
+            (
+                ClientRequest::CodeSearchDocumentSymbol {
+                    request_id: RequestId::Integer(12),
+                    params: v2::CodeSearchDocumentSymbolParams {
+                        path: Some("src/lib.rs".to_string()),
+                        uri: None,
+                    },
+                },
+                json!({
+                    "method": "codeSearch/documentSymbol",
+                    "id": 12,
+                    "params": {
+                        "path": "src/lib.rs",
+                        "uri": null
+                    }
+                }),
+                "codeSearch/documentSymbol",
+            ),
+        ];
+
+        for (request, expected, method) in cases {
+            assert_eq!(request.method(), method);
+            assert_eq!(serde_json::to_value(&request)?, expected);
+        }
+
+        Ok(())
+    }
+
+    #[test]
     fn serialize_thread_background_terminals_clean() -> Result<()> {
         let request = ClientRequest::ThreadBackgroundTerminalsClean {
             request_id: RequestId::Integer(8),
@@ -1523,6 +1644,66 @@ mod tests {
         let reason = crate::experimental_api::ExperimentalApi::experimental_reason(&request);
         assert_eq!(reason, Some("mock/experimentalMethod"));
     }
+
+    #[test]
+    fn code_search_requests_are_marked_experimental() {
+        let cases = vec![
+            (
+                ClientRequest::CodeSearchSymbol {
+                    request_id: RequestId::Integer(1),
+                    params: v2::CodeSearchSymbolParams {
+                        query: "CodeSearchSymbol".to_string(),
+                        roots: vec!["/repo".to_string()],
+                    },
+                },
+                "codeSearch/symbol",
+            ),
+            (
+                ClientRequest::CodeSearchDefinition {
+                    request_id: RequestId::Integer(1),
+                    params: v2::CodeSearchDefinitionParams {
+                        path: Some("src/lib.rs".to_string()),
+                        uri: None,
+                        start_line: 10,
+                        start_column: 5,
+                        end_line: 10,
+                        end_column: 11,
+                    },
+                },
+                "codeSearch/definition",
+            ),
+            (
+                ClientRequest::CodeSearchReferences {
+                    request_id: RequestId::Integer(1),
+                    params: v2::CodeSearchReferencesParams {
+                        path: Some("src/lib.rs".to_string()),
+                        uri: None,
+                        start_line: 10,
+                        start_column: 5,
+                        end_line: 10,
+                        end_column: 11,
+                    },
+                },
+                "codeSearch/references",
+            ),
+            (
+                ClientRequest::CodeSearchDocumentSymbol {
+                    request_id: RequestId::Integer(1),
+                    params: v2::CodeSearchDocumentSymbolParams {
+                        path: Some("src/lib.rs".to_string()),
+                        uri: None,
+                    },
+                },
+                "codeSearch/documentSymbol",
+            ),
+        ];
+
+        for (request, expected) in cases {
+            let reason = crate::experimental_api::ExperimentalApi::experimental_reason(&request);
+            assert_eq!(reason, Some(expected));
+        }
+    }
+
     #[test]
     fn thread_realtime_start_is_marked_experimental() {
         let request = ClientRequest::ThreadRealtimeStart {

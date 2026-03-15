@@ -22,6 +22,7 @@ mod compact_remote;
 pub use codex_thread::CodexThread;
 pub use codex_thread::ThreadConfigSnapshot;
 mod agent;
+pub mod code_search;
 mod codex_delegate;
 mod command_canonicalization;
 mod commit_attribution;

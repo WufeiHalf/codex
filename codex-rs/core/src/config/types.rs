@@ -30,6 +30,9 @@ pub const DEFAULT_MEMORIES_MAX_ROLLOUT_AGE_DAYS: i64 = 30;
 pub const DEFAULT_MEMORIES_MIN_ROLLOUT_IDLE_HOURS: i64 = 6;
 pub const DEFAULT_MEMORIES_MAX_RAW_MEMORIES_FOR_CONSOLIDATION: usize = 256;
 pub const DEFAULT_MEMORIES_MAX_UNUSED_DAYS: i64 = 30;
+pub const DEFAULT_CODE_SEARCH_ENABLED: bool = true;
+pub const DEFAULT_CODE_SEARCH_AUTO_DETECT: bool = true;
+pub const DEFAULT_CODE_SEARCH_AUTO_INSTALL: bool = false;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -508,6 +511,81 @@ impl From<MemoriesToml> for MemoriesConfig {
                 .clamp(1, 48),
             extract_model: toml.extract_model,
             consolidation_model: toml.consolidation_model,
+        }
+    }
+}
+
+/// Code search settings loaded from config.toml.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CodeSearchToml {
+    /// When `false`, disables internal code search runtime behavior even when the
+    /// experimental feature flag is enabled.
+    pub enabled: Option<bool>,
+    /// When `true`, Codex attempts built-in language-server auto-detection for
+    /// supported languages when no explicit command is configured.
+    pub auto_detect: Option<bool>,
+    /// When `true`, Codex attempts on-demand installation for supported
+    /// language servers after explicit, managed, and PATH-visible commands have
+    /// been exhausted.
+    pub auto_install: Option<bool>,
+    /// Per-language language-server startup overrides.
+    #[serde(default)]
+    pub lsp: BTreeMap<String, CodeSearchLanguageServerToml>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CodeSearchLanguageServerToml {
+    /// Full argv used to spawn the language server for this language.
+    pub command: Option<Vec<String>>,
+}
+
+/// Effective code search settings after defaults are applied.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeSearchConfig {
+    pub enabled: bool,
+    pub auto_detect: bool,
+    pub auto_install: bool,
+    pub lsp: BTreeMap<String, CodeSearchLanguageServerConfig>,
+}
+
+impl Default for CodeSearchConfig {
+    fn default() -> Self {
+        Self {
+            enabled: DEFAULT_CODE_SEARCH_ENABLED,
+            auto_detect: DEFAULT_CODE_SEARCH_AUTO_DETECT,
+            auto_install: DEFAULT_CODE_SEARCH_AUTO_INSTALL,
+            lsp: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CodeSearchLanguageServerConfig {
+    pub command: Option<Vec<String>>,
+}
+
+impl From<CodeSearchToml> for CodeSearchConfig {
+    fn from(toml: CodeSearchToml) -> Self {
+        let defaults = Self::default();
+        Self {
+            enabled: toml.enabled.unwrap_or(defaults.enabled),
+            auto_detect: toml.auto_detect.unwrap_or(defaults.auto_detect),
+            auto_install: toml.auto_install.unwrap_or(defaults.auto_install),
+            lsp: toml
+                .lsp
+                .into_iter()
+                .map(|(language, server)| (language, server.into()))
+                .collect(),
+        }
+    }
+}
+
+impl From<CodeSearchLanguageServerToml> for CodeSearchLanguageServerConfig {
+    fn from(toml: CodeSearchLanguageServerToml) -> Self {
+        Self {
+            command: toml.command,
         }
     }
 }

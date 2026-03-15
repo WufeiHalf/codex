@@ -751,6 +751,22 @@ pub async fn apply(
         .context("config persistence task panicked")?
 }
 
+pub fn code_search_defaults_missing(codex_home: &Path) -> anyhow::Result<bool> {
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+    let contents = match std::fs::read_to_string(&config_path) {
+        Ok(contents) => contents,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+        Err(err) => return Err(err.into()),
+    };
+    let document = contents
+        .parse::<DocumentMut>()
+        .with_context(|| format!("failed to parse {}", config_path.display()))?;
+
+    Ok(document
+        .get("code_search")
+        .is_none_or(toml_edit::Item::is_none))
+}
+
 /// Fluent builder to batch config edits and apply them atomically.
 #[derive(Default)]
 pub struct ConfigEditsBuilder {
@@ -862,6 +878,30 @@ impl ConfigEditsBuilder {
         self.edits.push(ConfigEdit::SetPath {
             segments: vec!["features".to_string(), key.to_string()],
             value: value(enabled),
+        });
+        self
+    }
+
+    pub fn set_code_search_enabled(mut self, enabled: bool) -> Self {
+        self.edits.push(ConfigEdit::SetPath {
+            segments: vec!["code_search".to_string(), "enabled".to_string()],
+            value: value(enabled),
+        });
+        self
+    }
+
+    pub fn set_code_search_auto_detect(mut self, auto_detect: bool) -> Self {
+        self.edits.push(ConfigEdit::SetPath {
+            segments: vec!["code_search".to_string(), "auto_detect".to_string()],
+            value: value(auto_detect),
+        });
+        self
+    }
+
+    pub fn set_code_search_auto_install(mut self, auto_install: bool) -> Self {
+        self.edits.push(ConfigEdit::SetPath {
+            segments: vec!["code_search".to_string(), "auto_install".to_string()],
+            value: value(auto_install),
         });
         self
     }
@@ -1001,6 +1041,52 @@ model_reasoning_effort = "high"
         let contents =
             std::fs::read_to_string(codex_home.join(CONFIG_TOML_FILE)).expect("read config");
         assert_eq!(contents, "enabled = true\n");
+    }
+
+    #[test]
+    fn code_search_defaults_missing_returns_true_when_config_is_absent() {
+        let tmp = tempdir().expect("tmpdir");
+
+        let missing = code_search_defaults_missing(tmp.path()).expect("check config");
+
+        assert!(missing);
+    }
+
+    #[test]
+    fn code_search_defaults_missing_returns_false_when_code_search_exists() {
+        let tmp = tempdir().expect("tmpdir");
+        let codex_home = tmp.path();
+        std::fs::write(
+            codex_home.join(CONFIG_TOML_FILE),
+            "[code_search]\nauto_detect = false\n",
+        )
+        .expect("write config");
+
+        let missing = code_search_defaults_missing(codex_home).expect("check config");
+
+        assert!(!missing);
+    }
+
+    #[test]
+    fn set_code_search_defaults_writes_runtime_config() {
+        let tmp = tempdir().expect("tmpdir");
+        let codex_home = tmp.path();
+
+        ConfigEditsBuilder::new(codex_home)
+            .set_code_search_enabled(true)
+            .set_code_search_auto_detect(true)
+            .set_code_search_auto_install(false)
+            .apply_blocking()
+            .expect("persist");
+
+        let contents =
+            std::fs::read_to_string(codex_home.join(CONFIG_TOML_FILE)).expect("read config");
+        let expected = r#"[code_search]
+enabled = true
+auto_detect = true
+auto_install = false
+"#;
+        assert_eq!(contents, expected);
     }
 
     #[test]

@@ -161,6 +161,10 @@ Example with notification opt-out:
 - `skills/remote/list` — list public remote skills (**under development; do not call from production clients yet**).
 - `skills/remote/export` — download a remote skill by `hazelnutId` into `skills` under `codex_home` (**under development; do not call from production clients yet**).
 - `app/list` — list available apps.
+- `codeSearch/symbol` — structured symbol search with normalized document/range metadata and provenance (experimental).
+- `codeSearch/definition` — structured definition lookup for a document location with provenance (experimental).
+- `codeSearch/references` — structured reference lookup for a document location with provenance (experimental).
+- `codeSearch/documentSymbol` — structured document symbol enumeration with flattened container metadata and provenance (experimental).
 - `skills/config/write` — write user-level skill config by path.
 - `plugin/install` — install a plugin from a discovered marketplace entry and return any apps that still need auth (**under development; do not call from production clients yet**).
 - `plugin/uninstall` — uninstall a plugin by id by removing its cached files and clearing its user-level config entry (**under development; do not call from production clients yet**).
@@ -1145,6 +1149,64 @@ $demo-app Pull the latest updates from the team.
       },
       { "type": "mention", "name": "Demo App", "path": "app://demo-app" }
     ]
+  }
+}
+```
+
+## Code search (experimental)
+
+Use the `codeSearch/*` RPCs for structured code navigation when `initialize.params.capabilities.experimentalApi = true` and the `internal_code_search` feature is enabled in config.
+
+- `codeSearch/symbol` accepts `{ query, roots }` and returns `matches`, `provenance`, and optional `warning`.
+- `codeSearch/definition` accepts either `path` or `uri` plus a 1-indexed `{ startLine, startColumn, endLine, endColumn }` range and returns `locations`, `provenance`, and optional `warning`.
+- `codeSearch/references` accepts the same document/range shape as `codeSearch/definition` and returns `locations`, `provenance`, and optional `warning`.
+- `codeSearch/documentSymbol` accepts either `path` or `uri` and returns flattened `symbols` with optional `containerName`, `selectionRange`, `provenance`, and optional `warning`.
+
+`provenance.backend` is one of `lsp`, `grepFallback`, `fileSearchFallback`, or `unavailable`. `provenance.provider` identifies the concrete provider when available, such as the launched language server command or an existing fallback provider. `provenance.language`, `provenance.resolutionSource`, and `provenance.installAttempted` expose the lookup language, how Codex resolved the server, and whether on-demand installation ran for that lookup.
+
+Successful LSP lookups do not emit success-only notices. When Codex falls back because a language server is unavailable, fails at runtime, or fails to install, `warning` explains the fallback and `provenance` records the backend and resolution details.
+
+Example symbol lookup:
+
+```json
+{
+  "method": "codeSearch/symbol",
+  "id": 52,
+  "params": {
+    "query": "CodexMessageProcessor",
+    "roots": ["/Users/me/src/codex/codex-rs/app-server"]
+  }
+}
+{
+  "id": 52,
+  "result": {
+    "matches": [
+      {
+        "name": "CodexMessageProcessor",
+        "kind": "struct",
+        "containerName": null,
+        "detail": null,
+        "location": {
+          "document": {
+            "path": "/Users/me/src/codex/codex-rs/app-server/src/codex_message_processor.rs",
+            "uri": null
+          },
+          "range": {
+            "start": { "line": 332, "column": 1 },
+            "end": { "line": 332, "column": 23 }
+          }
+        }
+      }
+    ],
+    "provenance": {
+      "backend": "lsp",
+      "provider": "rust-analyzer",
+      "language": "rust",
+      "resolutionSource": "explicit",
+      "installAttempted": false
+    },
+    "notice": null,
+    "warning": null
   }
 }
 ```

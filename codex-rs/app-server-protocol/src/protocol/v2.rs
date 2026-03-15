@@ -74,6 +74,11 @@ use codex_protocol::user_input::TextElement as CoreTextElement;
 use codex_protocol::user_input::UserInput as CoreUserInput;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use schemars::JsonSchema;
+use schemars::r#gen::SchemaGenerator;
+use schemars::schema::InstanceType;
+use schemars::schema::ObjectValidation;
+use schemars::schema::Schema;
+use schemars::schema::SchemaObject;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
@@ -1521,6 +1526,348 @@ pub struct GetAccountParams {
 pub struct GetAccountResponse {
     pub account: Option<Account>,
     pub requires_openai_auth: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeSearchDocument {
+    pub path: Option<String>,
+    pub uri: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeSearchLocation {
+    #[ts(inline)]
+    pub document: CodeSearchDocument,
+    pub range: Option<TextRange>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum CodeSearchBackend {
+    Lsp,
+    GrepFallback,
+    FileSearchFallback,
+    Unavailable,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeSearchProvenance {
+    #[ts(inline)]
+    pub backend: CodeSearchBackend,
+    pub provider: Option<String>,
+    pub language: Option<String>,
+    pub resolution_source: Option<String>,
+    pub install_attempted: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeSearchSymbolMatch {
+    pub name: String,
+    pub kind: Option<String>,
+    pub container_name: Option<String>,
+    pub detail: Option<String>,
+    #[ts(inline)]
+    pub location: CodeSearchLocation,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeSearchLocationResult {
+    pub name: Option<String>,
+    pub kind: Option<String>,
+    #[ts(inline)]
+    pub location: CodeSearchLocation,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeSearchDocumentSymbolResult {
+    pub name: String,
+    pub kind: Option<String>,
+    pub detail: Option<String>,
+    pub container_name: Option<String>,
+    #[ts(inline)]
+    pub location: CodeSearchLocation,
+    pub selection_range: Option<TextRange>,
+}
+
+fn code_search_object_schema<const N: usize>(
+    properties: [(&str, Schema); N],
+    required: &[&str],
+) -> Schema {
+    let mut object = ObjectValidation::default();
+    for (name, schema) in properties {
+        object.properties.insert(name.to_string(), schema);
+    }
+    for name in required {
+        object.required.insert((*name).to_string());
+    }
+
+    SchemaObject {
+        instance_type: Some(InstanceType::Object.into()),
+        object: Some(Box::new(object)),
+        ..SchemaObject::default()
+    }
+    .into()
+}
+
+impl JsonSchema for CodeSearchDocument {
+    fn is_referenceable() -> bool {
+        false
+    }
+
+    fn schema_name() -> String {
+        "CodeSearchDocument".to_string()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        code_search_object_schema(
+            [
+                ("path", generator.subschema_for::<Option<String>>()),
+                ("uri", generator.subschema_for::<Option<String>>()),
+            ],
+            &[],
+        )
+    }
+}
+
+impl JsonSchema for CodeSearchLocation {
+    fn is_referenceable() -> bool {
+        false
+    }
+
+    fn schema_name() -> String {
+        "CodeSearchLocation".to_string()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        code_search_object_schema(
+            [
+                ("document", generator.subschema_for::<CodeSearchDocument>()),
+                ("range", generator.subschema_for::<Option<TextRange>>()),
+            ],
+            &["document", "range"],
+        )
+    }
+}
+
+impl JsonSchema for CodeSearchBackend {
+    fn is_referenceable() -> bool {
+        false
+    }
+
+    fn schema_name() -> String {
+        "CodeSearchBackend".to_string()
+    }
+
+    fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
+        SchemaObject {
+            instance_type: Some(InstanceType::String.into()),
+            enum_values: Some(vec![
+                serde_json::json!("lsp"),
+                serde_json::json!("grepFallback"),
+                serde_json::json!("fileSearchFallback"),
+                serde_json::json!("unavailable"),
+            ]),
+            ..SchemaObject::default()
+        }
+        .into()
+    }
+}
+
+impl JsonSchema for CodeSearchProvenance {
+    fn is_referenceable() -> bool {
+        false
+    }
+
+    fn schema_name() -> String {
+        "CodeSearchProvenance".to_string()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        code_search_object_schema(
+            [
+                ("backend", generator.subschema_for::<CodeSearchBackend>()),
+                ("provider", generator.subschema_for::<Option<String>>()),
+                ("language", generator.subschema_for::<Option<String>>()),
+                (
+                    "resolutionSource",
+                    generator.subschema_for::<Option<String>>(),
+                ),
+                ("installAttempted", generator.subschema_for::<bool>()),
+            ],
+            &["backend", "installAttempted"],
+        )
+    }
+}
+
+impl JsonSchema for CodeSearchSymbolMatch {
+    fn is_referenceable() -> bool {
+        false
+    }
+
+    fn schema_name() -> String {
+        "CodeSearchSymbolMatch".to_string()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        code_search_object_schema(
+            [
+                ("name", generator.subschema_for::<String>()),
+                ("kind", generator.subschema_for::<Option<String>>()),
+                ("containerName", generator.subschema_for::<Option<String>>()),
+                ("detail", generator.subschema_for::<Option<String>>()),
+                ("location", generator.subschema_for::<CodeSearchLocation>()),
+            ],
+            &["name", "location"],
+        )
+    }
+}
+
+impl JsonSchema for CodeSearchLocationResult {
+    fn is_referenceable() -> bool {
+        false
+    }
+
+    fn schema_name() -> String {
+        "CodeSearchLocationResult".to_string()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        code_search_object_schema(
+            [
+                ("name", generator.subschema_for::<Option<String>>()),
+                ("kind", generator.subschema_for::<Option<String>>()),
+                ("location", generator.subschema_for::<CodeSearchLocation>()),
+            ],
+            &["location"],
+        )
+    }
+}
+
+impl JsonSchema for CodeSearchDocumentSymbolResult {
+    fn is_referenceable() -> bool {
+        false
+    }
+
+    fn schema_name() -> String {
+        "CodeSearchDocumentSymbolResult".to_string()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        code_search_object_schema(
+            [
+                ("name", generator.subschema_for::<String>()),
+                ("kind", generator.subschema_for::<Option<String>>()),
+                ("detail", generator.subschema_for::<Option<String>>()),
+                ("containerName", generator.subschema_for::<Option<String>>()),
+                ("location", generator.subschema_for::<CodeSearchLocation>()),
+                (
+                    "selectionRange",
+                    generator.subschema_for::<Option<TextRange>>(),
+                ),
+            ],
+            &["name", "location"],
+        )
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct CodeSearchSymbolParams {
+    pub query: String,
+    pub roots: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct CodeSearchSymbolResponse {
+    #[ts(inline)]
+    pub matches: Vec<CodeSearchSymbolMatch>,
+    #[ts(inline)]
+    pub provenance: CodeSearchProvenance,
+    pub notice: Option<String>,
+    pub warning: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct CodeSearchDefinitionParams {
+    #[ts(optional = nullable)]
+    pub path: Option<String>,
+    #[ts(optional = nullable)]
+    pub uri: Option<String>,
+    pub start_line: usize,
+    pub start_column: usize,
+    pub end_line: usize,
+    pub end_column: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct CodeSearchDefinitionResponse {
+    #[ts(inline)]
+    pub locations: Vec<CodeSearchLocationResult>,
+    #[ts(inline)]
+    pub provenance: CodeSearchProvenance,
+    pub notice: Option<String>,
+    pub warning: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct CodeSearchReferencesParams {
+    #[ts(optional = nullable)]
+    pub path: Option<String>,
+    #[ts(optional = nullable)]
+    pub uri: Option<String>,
+    pub start_line: usize,
+    pub start_column: usize,
+    pub end_line: usize,
+    pub end_column: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct CodeSearchReferencesResponse {
+    #[ts(inline)]
+    pub locations: Vec<CodeSearchLocationResult>,
+    #[ts(inline)]
+    pub provenance: CodeSearchProvenance,
+    pub notice: Option<String>,
+    pub warning: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct CodeSearchDocumentSymbolParams {
+    #[ts(optional = nullable)]
+    pub path: Option<String>,
+    #[ts(optional = nullable)]
+    pub uri: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct CodeSearchDocumentSymbolResponse {
+    #[ts(inline)]
+    pub symbols: Vec<CodeSearchDocumentSymbolResult>,
+    #[ts(inline)]
+    pub provenance: CodeSearchProvenance,
+    pub notice: Option<String>,
+    pub warning: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema, TS)]
@@ -6373,6 +6720,413 @@ mod tests {
                 "success": true,
             })
         );
+    }
+
+    #[test]
+    fn code_search_symbol_response_round_trips() {
+        let response = CodeSearchSymbolResponse {
+            matches: vec![CodeSearchSymbolMatch {
+                name: "ThreadStartParams".to_string(),
+                kind: Some("struct".to_string()),
+                container_name: Some("v2".to_string()),
+                detail: Some("pub struct ThreadStartParams".to_string()),
+                location: CodeSearchLocation {
+                    document: CodeSearchDocument {
+                        path: Some("src/protocol/v2.rs".to_string()),
+                        uri: None,
+                    },
+                    range: None,
+                },
+            }],
+            provenance: CodeSearchProvenance {
+                backend: CodeSearchBackend::FileSearchFallback,
+                provider: Some("file-search".to_string()),
+                language: Some("rust".to_string()),
+                resolution_source: None,
+                install_attempted: false,
+            },
+            notice: Some("Falling back to file search for symbol lookup.".to_string()),
+            warning: Some(
+                "Structured ranges are unavailable for file-search fallback.".to_string(),
+            ),
+        };
+
+        let value = serde_json::to_value(&response).expect("response should serialize");
+        assert_eq!(
+            value,
+            json!({
+                "matches": [
+                    {
+                        "name": "ThreadStartParams",
+                        "kind": "struct",
+                        "containerName": "v2",
+                        "detail": "pub struct ThreadStartParams",
+                        "location": {
+                            "document": {
+                                "path": "src/protocol/v2.rs",
+                                "uri": null
+                            },
+                            "range": null
+                        }
+                    }
+                ],
+                "provenance": {
+                    "backend": "fileSearchFallback",
+                    "provider": "file-search",
+                    "language": "rust",
+                    "resolutionSource": null,
+                    "installAttempted": false
+                },
+                "notice": "Falling back to file search for symbol lookup.",
+                "warning": "Structured ranges are unavailable for file-search fallback."
+            })
+        );
+
+        let decoded =
+            serde_json::from_value::<CodeSearchSymbolResponse>(value).expect("round-trip");
+        assert_eq!(decoded, response);
+    }
+
+    #[test]
+    fn code_search_location_responses_round_trip() {
+        let definition_response = CodeSearchDefinitionResponse {
+            locations: vec![CodeSearchLocationResult {
+                name: Some("ThreadStartParams".to_string()),
+                kind: Some("struct".to_string()),
+                location: CodeSearchLocation {
+                    document: CodeSearchDocument {
+                        path: Some("src/protocol/v2.rs".to_string()),
+                        uri: None,
+                    },
+                    range: Some(TextRange {
+                        start: TextPosition {
+                            line: 2000,
+                            column: 1,
+                        },
+                        end: TextPosition {
+                            line: 2000,
+                            column: 18,
+                        },
+                    }),
+                },
+            }],
+            provenance: CodeSearchProvenance {
+                backend: CodeSearchBackend::Lsp,
+                provider: Some("rust-analyzer".to_string()),
+                language: Some("rust".to_string()),
+                resolution_source: Some("managed_install".to_string()),
+                install_attempted: true,
+            },
+            notice: None,
+            warning: Some("Definition lookup used a workspace index.".to_string()),
+        };
+
+        let definition_value =
+            serde_json::to_value(&definition_response).expect("response should serialize");
+        assert_eq!(
+            definition_value,
+            json!({
+                "locations": [
+                    {
+                        "name": "ThreadStartParams",
+                        "kind": "struct",
+                        "location": {
+                            "document": {
+                                "path": "src/protocol/v2.rs",
+                                "uri": null
+                            },
+                            "range": {
+                                "start": {
+                                    "line": 2000,
+                                    "column": 1
+                                },
+                                "end": {
+                                    "line": 2000,
+                                    "column": 18
+                                }
+                            }
+                        }
+                    }
+                ],
+                "provenance": {
+                    "backend": "lsp",
+                    "provider": "rust-analyzer",
+                    "language": "rust",
+                    "resolutionSource": "managed_install",
+                    "installAttempted": true
+                },
+                "notice": null,
+                "warning": "Definition lookup used a workspace index."
+            })
+        );
+        let decoded_definition =
+            serde_json::from_value::<CodeSearchDefinitionResponse>(definition_value)
+                .expect("round-trip");
+        assert_eq!(decoded_definition, definition_response);
+
+        let references_response = CodeSearchReferencesResponse {
+            locations: vec![CodeSearchLocationResult {
+                name: Some("TextRange".to_string()),
+                kind: Some("struct".to_string()),
+                location: CodeSearchLocation {
+                    document: CodeSearchDocument {
+                        path: Some("src/protocol/v2.rs".to_string()),
+                        uri: None,
+                    },
+                    range: Some(TextRange {
+                        start: TextPosition {
+                            line: 5211,
+                            column: 1,
+                        },
+                        end: TextPosition {
+                            line: 5211,
+                            column: 10,
+                        },
+                    }),
+                },
+            }],
+            provenance: CodeSearchProvenance {
+                backend: CodeSearchBackend::GrepFallback,
+                provider: Some("rg".to_string()),
+                language: Some("rust".to_string()),
+                resolution_source: Some("auto_detect".to_string()),
+                install_attempted: false,
+            },
+            notice: Some("Falling back to text search for references.".to_string()),
+            warning: Some("Language server unavailable; references may be incomplete.".to_string()),
+        };
+
+        let references_value =
+            serde_json::to_value(&references_response).expect("response should serialize");
+        assert_eq!(
+            references_value,
+            json!({
+                "locations": [
+                    {
+                        "name": "TextRange",
+                        "kind": "struct",
+                        "location": {
+                            "document": {
+                                "path": "src/protocol/v2.rs",
+                                "uri": null
+                            },
+                            "range": {
+                                "start": {
+                                    "line": 5211,
+                                    "column": 1
+                                },
+                                "end": {
+                                    "line": 5211,
+                                    "column": 10
+                                }
+                            }
+                        }
+                    }
+                ],
+                "provenance": {
+                    "backend": "grepFallback",
+                    "provider": "rg",
+                    "language": "rust",
+                    "resolutionSource": "auto_detect",
+                    "installAttempted": false
+                },
+                "notice": "Falling back to text search for references.",
+                "warning": "Language server unavailable; references may be incomplete."
+            })
+        );
+        let decoded_references =
+            serde_json::from_value::<CodeSearchReferencesResponse>(references_value)
+                .expect("round-trip");
+        assert_eq!(decoded_references, references_response);
+    }
+
+    #[test]
+    fn code_search_document_symbol_response_round_trips() {
+        let response = CodeSearchDocumentSymbolResponse {
+            symbols: vec![
+                CodeSearchDocumentSymbolResult {
+                    name: "GetAccountResponse".to_string(),
+                    kind: Some("struct".to_string()),
+                    detail: Some("account payload".to_string()),
+                    container_name: Some("v2".to_string()),
+                    location: CodeSearchLocation {
+                        document: CodeSearchDocument {
+                            path: Some("src/protocol/v2.rs".to_string()),
+                            uri: None,
+                        },
+                        range: Some(TextRange {
+                            start: TextPosition {
+                                line: 1524,
+                                column: 1,
+                            },
+                            end: TextPosition {
+                                line: 1527,
+                                column: 2,
+                            },
+                        }),
+                    },
+                    selection_range: Some(TextRange {
+                        start: TextPosition {
+                            line: 1524,
+                            column: 12,
+                        },
+                        end: TextPosition {
+                            line: 1524,
+                            column: 30,
+                        },
+                    }),
+                },
+                CodeSearchDocumentSymbolResult {
+                    name: "account".to_string(),
+                    kind: Some("field".to_string()),
+                    detail: None,
+                    container_name: Some("GetAccountResponse".to_string()),
+                    location: CodeSearchLocation {
+                        document: CodeSearchDocument {
+                            path: Some("src/protocol/v2.rs".to_string()),
+                            uri: None,
+                        },
+                        range: Some(TextRange {
+                            start: TextPosition {
+                                line: 1525,
+                                column: 5,
+                            },
+                            end: TextPosition {
+                                line: 1525,
+                                column: 24,
+                            },
+                        }),
+                    },
+                    selection_range: None,
+                },
+            ],
+            provenance: CodeSearchProvenance {
+                backend: CodeSearchBackend::Lsp,
+                provider: Some("rust-analyzer".to_string()),
+                language: Some("rust".to_string()),
+                resolution_source: Some("explicit".to_string()),
+                install_attempted: false,
+            },
+            notice: None,
+            warning: Some("Document symbol tree may omit unsupported node kinds.".to_string()),
+        };
+
+        let value = serde_json::to_value(&response).expect("response should serialize");
+        assert_eq!(
+            value,
+            json!({
+                "symbols": [
+                    {
+                        "name": "GetAccountResponse",
+                        "kind": "struct",
+                        "detail": "account payload",
+                        "containerName": "v2",
+                        "location": {
+                            "document": {
+                                "path": "src/protocol/v2.rs",
+                                "uri": null
+                            },
+                            "range": {
+                                "start": {
+                                    "line": 1524,
+                                    "column": 1
+                                },
+                                "end": {
+                                    "line": 1527,
+                                    "column": 2
+                                }
+                            }
+                        },
+                        "selectionRange": {
+                            "start": {
+                                "line": 1524,
+                                "column": 12
+                            },
+                            "end": {
+                                "line": 1524,
+                                "column": 30
+                            }
+                        }
+                    },
+                    {
+                        "name": "account",
+                        "kind": "field",
+                        "detail": null,
+                        "containerName": "GetAccountResponse",
+                        "location": {
+                            "document": {
+                                "path": "src/protocol/v2.rs",
+                                "uri": null
+                            },
+                            "range": {
+                                "start": {
+                                    "line": 1525,
+                                    "column": 5
+                                },
+                                "end": {
+                                    "line": 1525,
+                                    "column": 24
+                                }
+                            }
+                        },
+                        "selectionRange": null
+                    }
+                ],
+                "provenance": {
+                    "backend": "lsp",
+                    "provider": "rust-analyzer",
+                    "language": "rust",
+                    "resolutionSource": "explicit",
+                    "installAttempted": false
+                },
+                "notice": null,
+                "warning": "Document symbol tree may omit unsupported node kinds."
+            })
+        );
+
+        let decoded =
+            serde_json::from_value::<CodeSearchDocumentSymbolResponse>(value).expect("round-trip");
+        assert_eq!(decoded, response);
+    }
+
+    #[test]
+    fn code_search_unavailable_response_round_trips() {
+        let response = CodeSearchDefinitionResponse {
+            locations: Vec::new(),
+            provenance: CodeSearchProvenance {
+                backend: CodeSearchBackend::Unavailable,
+                provider: None,
+                language: Some("rust".to_string()),
+                resolution_source: None,
+                install_attempted: false,
+            },
+            notice: None,
+            warning: Some(
+                "Rust language server is unavailable; falling back produced no results."
+                    .to_string(),
+            ),
+        };
+
+        let value = serde_json::to_value(&response).expect("response should serialize");
+        assert_eq!(
+            value,
+            json!({
+                "locations": [],
+                "provenance": {
+                    "backend": "unavailable",
+                    "provider": null,
+                    "language": "rust",
+                    "resolutionSource": null,
+                    "installAttempted": false
+                },
+                "notice": null,
+                "warning": "Rust language server is unavailable; falling back produced no results."
+            })
+        );
+
+        let decoded =
+            serde_json::from_value::<CodeSearchDefinitionResponse>(value).expect("round-trip");
+        assert_eq!(decoded, response);
     }
 
     #[test]

@@ -10,6 +10,10 @@ use crate::models_manager::collaboration_mode_presets::CollaborationModesConfig;
 use crate::tools::handlers::CRON_CREATE_TOOL_NAME;
 use crate::tools::handlers::CRON_DELETE_TOOL_NAME;
 use crate::tools::handlers::CRON_LIST_TOOL_NAME;
+use crate::tools::handlers::FIND_CODE_SYMBOLS_TOOL_NAME;
+use crate::tools::handlers::FIND_DEFINITIONS_TOOL_NAME;
+use crate::tools::handlers::FIND_DOCUMENT_SYMBOLS_TOOL_NAME;
+use crate::tools::handlers::FIND_REFERENCES_TOOL_NAME;
 use crate::tools::handlers::PLAN_TOOL;
 use crate::tools::handlers::SEARCH_TOOL_BM25_DEFAULT_LIMIT;
 use crate::tools::handlers::SEARCH_TOOL_BM25_TOOL_NAME;
@@ -68,6 +72,7 @@ pub(crate) struct ToolsConfig {
     pub image_gen_tool: bool,
     pub agent_roles: BTreeMap<String, AgentRoleConfig>,
     pub search_tool: bool,
+    pub internal_code_search_tools: bool,
     pub request_permission_enabled: bool,
     pub scheduled_tasks_enabled: bool,
     pub request_permissions_tool_enabled: bool,
@@ -108,6 +113,7 @@ impl ToolsConfig {
         let include_default_mode_request_user_input =
             include_request_user_input && features.enabled(Feature::DefaultModeRequestUserInput);
         let include_search_tool = features.enabled(Feature::Apps);
+        let include_internal_code_search_tools = features.enabled(Feature::InternalCodeSearch);
         let include_artifact_tools = features.enabled(Feature::Artifact);
         let include_image_gen_tool =
             features.enabled(Feature::ImageGeneration) && supports_image_generation(model_info);
@@ -176,6 +182,7 @@ impl ToolsConfig {
             image_gen_tool: include_image_gen_tool,
             agent_roles: BTreeMap::new(),
             search_tool: include_search_tool,
+            internal_code_search_tools: include_internal_code_search_tools,
             request_permission_enabled,
             scheduled_tasks_enabled: *scheduled_tasks_enabled,
             request_permissions_tool_enabled,
@@ -1948,6 +1955,200 @@ fn create_search_tool_bm25_tool(app_tools: &HashMap<String, ToolInfo>) -> ToolSp
     })
 }
 
+fn create_find_code_symbols_tool() -> ToolSpec {
+    let properties = BTreeMap::from([
+        (
+            "query".to_string(),
+            JsonSchema::String {
+                description: Some("Symbol name or partial symbol name to search for.".to_string()),
+            },
+        ),
+        (
+            "roots".to_string(),
+            JsonSchema::Array {
+                items: Box::new(JsonSchema::String {
+                    description: Some(
+                        "Absolute or workspace-relative roots to search within.".to_string(),
+                    ),
+                }),
+                description: Some(
+                    "Optional list of roots to scope the search. Defaults to the current workspace."
+                        .to_string(),
+                ),
+            },
+        ),
+        (
+            "language_hint".to_string(),
+            JsonSchema::String {
+                description: Some(
+                    "Optional language hint such as rust, typescript, javascript, python, or go."
+                        .to_string(),
+                ),
+            },
+        ),
+        (
+            "limit".to_string(),
+            JsonSchema::Number {
+                description: Some("Maximum number of symbol matches to return.".to_string()),
+            },
+        ),
+    ]);
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: FIND_CODE_SYMBOLS_TOOL_NAME.to_string(),
+        description: "Use this first for code navigation when internal code search is enabled. Finds code symbols with LSP-backed lookup when available, then falls back to built-in search while preserving warnings and provenance.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["query".to_string()]),
+            additional_properties: Some(false.into()),
+        },
+    })
+}
+
+fn create_find_definitions_tool() -> ToolSpec {
+    let properties = BTreeMap::from([
+        (
+            "path".to_string(),
+            JsonSchema::String {
+                description: Some(
+                    "Absolute or workspace-relative path to the file containing the symbol usage."
+                        .to_string(),
+                ),
+            },
+        ),
+        (
+            "line".to_string(),
+            JsonSchema::Number {
+                description: Some("1-indexed line number for the symbol position.".to_string()),
+            },
+        ),
+        (
+            "column".to_string(),
+            JsonSchema::Number {
+                description: Some("1-indexed column number for the symbol position.".to_string()),
+            },
+        ),
+        (
+            "roots".to_string(),
+            JsonSchema::Array {
+                items: Box::new(JsonSchema::String {
+                    description: Some(
+                        "Absolute or workspace-relative roots to search within.".to_string(),
+                    ),
+                }),
+                description: Some(
+                    "Optional list of roots to scope the lookup. Defaults to the current workspace."
+                        .to_string(),
+                ),
+            },
+        ),
+    ]);
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: FIND_DEFINITIONS_TOOL_NAME.to_string(),
+        description: "Use this before grep or broad file reads when you need the definition for a symbol at a specific file position."
+            .to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec![
+                "path".to_string(),
+                "line".to_string(),
+                "column".to_string(),
+            ]),
+            additional_properties: Some(false.into()),
+        },
+    })
+}
+
+fn create_find_document_symbols_tool() -> ToolSpec {
+    let properties = BTreeMap::from([(
+        "path".to_string(),
+        JsonSchema::String {
+            description: Some(
+                "Absolute or workspace-relative path to the file whose document symbols should be listed."
+                    .to_string(),
+            ),
+        },
+    )]);
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: FIND_DOCUMENT_SYMBOLS_TOOL_NAME.to_string(),
+        description: "Use this before broad file reads when you need the symbol outline for a specific file. Prefers LSP-backed document symbols and falls back to built-in parsing while preserving provenance.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["path".to_string()]),
+            additional_properties: Some(false.into()),
+        },
+    })
+}
+
+fn create_find_references_tool() -> ToolSpec {
+    let properties = BTreeMap::from([
+        (
+            "path".to_string(),
+            JsonSchema::String {
+                description: Some(
+                    "Absolute or workspace-relative path to the file containing the symbol."
+                        .to_string(),
+                ),
+            },
+        ),
+        (
+            "line".to_string(),
+            JsonSchema::Number {
+                description: Some("1-indexed line number for the symbol position.".to_string()),
+            },
+        ),
+        (
+            "column".to_string(),
+            JsonSchema::Number {
+                description: Some("1-indexed column number for the symbol position.".to_string()),
+            },
+        ),
+        (
+            "roots".to_string(),
+            JsonSchema::Array {
+                items: Box::new(JsonSchema::String {
+                    description: Some(
+                        "Absolute or workspace-relative roots to search within.".to_string(),
+                    ),
+                }),
+                description: Some(
+                    "Optional list of roots to scope the lookup. Defaults to the current workspace."
+                        .to_string(),
+                ),
+            },
+        ),
+        (
+            "include_declaration".to_string(),
+            JsonSchema::Boolean {
+                description: Some(
+                    "When true, include the symbol declaration in the returned references."
+                        .to_string(),
+                ),
+            },
+        ),
+    ]);
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: FIND_REFERENCES_TOOL_NAME.to_string(),
+        description: "Use this before grep or broad file reads when you need references for a symbol at a specific file position.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec![
+                "path".to_string(),
+                "line".to_string(),
+                "column".to_string(),
+            ]),
+            additional_properties: Some(false.into()),
+        },
+    })
+}
+
 fn create_read_file_tool() -> ToolSpec {
     let indentation_properties = BTreeMap::from([
         (
@@ -2454,6 +2655,7 @@ pub(crate) fn build_specs(
     use crate::tools::handlers::CronListHandler;
     use crate::tools::handlers::DynamicToolHandler;
     use crate::tools::handlers::GrepFilesHandler;
+    use crate::tools::handlers::InternalCodeSearchHandler;
     use crate::tools::handlers::JsReplHandler;
     use crate::tools::handlers::JsReplResetHandler;
     use crate::tools::handlers::ListDirHandler;
@@ -2493,6 +2695,7 @@ pub(crate) fn build_specs(
         default_mode_request_user_input: config.default_mode_request_user_input,
     });
     let search_tool_handler = Arc::new(SearchToolBm25Handler);
+    let internal_code_search_handler = Arc::new(InternalCodeSearchHandler);
     let js_repl_handler = Arc::new(JsReplHandler);
     let js_repl_reset_handler = Arc::new(JsReplResetHandler);
     let presentation_artifact_handler = Arc::new(PresentationArtifactHandler);
@@ -2585,6 +2788,26 @@ pub(crate) fn build_specs(
     {
         builder.push_spec_with_parallel_support(create_search_tool_bm25_tool(&app_tools), true);
         builder.register_handler(SEARCH_TOOL_BM25_TOOL_NAME, search_tool_handler);
+    }
+
+    if config.internal_code_search_tools {
+        builder.push_spec_with_parallel_support(create_find_code_symbols_tool(), true);
+        builder.push_spec_with_parallel_support(create_find_definitions_tool(), true);
+        builder.push_spec_with_parallel_support(create_find_document_symbols_tool(), true);
+        builder.push_spec_with_parallel_support(create_find_references_tool(), true);
+        builder.register_handler(
+            FIND_CODE_SYMBOLS_TOOL_NAME,
+            internal_code_search_handler.clone(),
+        );
+        builder.register_handler(
+            FIND_DEFINITIONS_TOOL_NAME,
+            internal_code_search_handler.clone(),
+        );
+        builder.register_handler(
+            FIND_DOCUMENT_SYMBOLS_TOOL_NAME,
+            internal_code_search_handler.clone(),
+        );
+        builder.register_handler(FIND_REFERENCES_TOOL_NAME, internal_code_search_handler);
     }
 
     if let Some(apply_patch_tool_type) = &config.apply_patch_tool_type {
@@ -3061,6 +3284,52 @@ mod tests {
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
         assert_contains_tool_names(&tools, &["presentation_artifact", "spreadsheet_artifact"]);
+    }
+
+    #[test]
+    fn test_build_specs_internal_code_search_tools_enabled() {
+        let config = test_config();
+        let model_info =
+            ModelsManager::construct_model_info_offline_for_tests("gpt-5-codex", &config);
+        let mut features = Features::with_defaults();
+        features.enable(Feature::InternalCodeSearch);
+        let tools_config = ToolsConfig::new(&ToolsConfigParams {
+            model_info: &model_info,
+            features: &features,
+            web_search_mode: Some(WebSearchMode::Cached),
+            session_source: SessionSource::Cli,
+            scheduled_tasks_enabled: true,
+        });
+        let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
+        assert_contains_tool_names(
+            &tools,
+            &[
+                FIND_CODE_SYMBOLS_TOOL_NAME,
+                FIND_DEFINITIONS_TOOL_NAME,
+                FIND_DOCUMENT_SYMBOLS_TOOL_NAME,
+                FIND_REFERENCES_TOOL_NAME,
+            ],
+        );
+    }
+
+    #[test]
+    fn test_build_specs_internal_code_search_tools_disabled_by_default() {
+        let config = test_config();
+        let model_info =
+            ModelsManager::construct_model_info_offline_for_tests("gpt-5-codex", &config);
+        let features = Features::with_defaults();
+        let tools_config = ToolsConfig::new(&ToolsConfigParams {
+            model_info: &model_info,
+            features: &features,
+            web_search_mode: Some(WebSearchMode::Cached),
+            session_source: SessionSource::Cli,
+            scheduled_tasks_enabled: true,
+        });
+        let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
+        assert_lacks_tool_name(&tools, FIND_CODE_SYMBOLS_TOOL_NAME);
+        assert_lacks_tool_name(&tools, FIND_DEFINITIONS_TOOL_NAME);
+        assert_lacks_tool_name(&tools, FIND_DOCUMENT_SYMBOLS_TOOL_NAME);
+        assert_lacks_tool_name(&tools, FIND_REFERENCES_TOOL_NAME);
     }
 
     #[test]

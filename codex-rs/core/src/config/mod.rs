@@ -2,6 +2,8 @@ use crate::auth::AuthCredentialsStoreMode;
 use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
 use crate::config::types::AppsConfigToml;
+use crate::config::types::CodeSearchConfig;
+use crate::config::types::CodeSearchToml;
 use crate::config::types::DEFAULT_OTEL_ENVIRONMENT;
 use crate::config::types::GithubWebhookToml;
 use crate::config::types::History;
@@ -379,6 +381,9 @@ pub struct Config {
 
     /// User-defined role declarations keyed by role name.
     pub agent_roles: BTreeMap<String, AgentRoleConfig>,
+
+    /// Internal code search runtime settings layered from user and trusted project config.
+    pub code_search: CodeSearchConfig,
 
     /// Memories subsystem settings.
     pub memories: MemoriesConfig,
@@ -1256,6 +1261,10 @@ pub struct ConfigToml {
 
     /// Nested tools section for feature toggles
     pub tools: Option<ToolsToml>,
+
+    /// Internal code search runtime settings.
+    #[serde(default)]
+    pub code_search: Option<CodeSearchToml>,
 
     /// Agent-related settings (thread limits, etc.).
     pub agents: Option<AgentsToml>,
@@ -2411,6 +2420,7 @@ impl Config {
             agent_max_threads,
             agent_max_depth,
             agent_roles,
+            code_search: cfg.code_search.unwrap_or_default().into(),
             memories: cfg.memories.unwrap_or_default().into(),
             agent_job_max_runtime_seconds,
             codex_home,
@@ -2899,6 +2909,78 @@ phase_2_model = "gpt-5"
                 consolidation_model: Some("gpt-5".to_string()),
             }
         );
+
+        let code_search = r#"
+[code_search]
+enabled = false
+auto_detect = false
+auto_install = true
+
+[code_search.lsp.rust]
+command = ["rust-analyzer"]
+
+[code_search.lsp.python]
+command = ["pyright-langserver", "--stdio"]
+"#;
+        let code_search_cfg =
+            toml::from_str::<ConfigToml>(code_search).expect("TOML deserialization should succeed");
+        assert_eq!(
+            code_search_cfg.code_search,
+            Some(CodeSearchToml {
+                enabled: Some(false),
+                auto_detect: Some(false),
+                auto_install: Some(true),
+                lsp: BTreeMap::from([
+                    (
+                        "python".to_string(),
+                        crate::config::types::CodeSearchLanguageServerToml {
+                            command: Some(vec![
+                                "pyright-langserver".to_string(),
+                                "--stdio".to_string(),
+                            ]),
+                        },
+                    ),
+                    (
+                        "rust".to_string(),
+                        crate::config::types::CodeSearchLanguageServerToml {
+                            command: Some(vec!["rust-analyzer".to_string()]),
+                        },
+                    ),
+                ]),
+            })
+        );
+
+        let config = Config::load_from_base_config_with_overrides(
+            code_search_cfg,
+            ConfigOverrides::default(),
+            tempdir().expect("tempdir").path().to_path_buf(),
+        )
+        .expect("load config from code search settings");
+        assert_eq!(
+            config.code_search,
+            CodeSearchConfig {
+                enabled: false,
+                auto_detect: false,
+                auto_install: true,
+                lsp: BTreeMap::from([
+                    (
+                        "python".to_string(),
+                        crate::config::types::CodeSearchLanguageServerConfig {
+                            command: Some(vec![
+                                "pyright-langserver".to_string(),
+                                "--stdio".to_string(),
+                            ]),
+                        },
+                    ),
+                    (
+                        "rust".to_string(),
+                        crate::config::types::CodeSearchLanguageServerConfig {
+                            command: Some(vec!["rust-analyzer".to_string()]),
+                        },
+                    ),
+                ]),
+            }
+        );
     }
 
     #[test]
@@ -2944,6 +3026,18 @@ phase_2_model = "gpt-5"
             cfg.model_availability_nux,
             ModelAvailabilityNuxConfig::default()
         );
+    }
+
+    #[test]
+    fn runtime_config_defaults_code_search() {
+        let cfg = Config::load_from_base_config_with_overrides(
+            ConfigToml::default(),
+            ConfigOverrides::default(),
+            tempdir().expect("tempdir").path().to_path_buf(),
+        )
+        .expect("load config");
+
+        assert_eq!(cfg.code_search, CodeSearchConfig::default());
     }
 
     #[test]
@@ -3677,6 +3771,57 @@ profile = "project"
 
         assert_eq!(config.active_profile.as_deref(), Some("project"));
         assert_eq!(config.model.as_deref(), Some("gpt-project"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn trusted_project_code_search_overrides_user_config() -> std::io::Result<()> {
+        let codex_home = TempDir::new()?;
+        let workspace = TempDir::new()?;
+        let workspace_key = workspace.path().to_string_lossy().replace('\\', "\\\\");
+        std::fs::write(
+            codex_home.path().join(CONFIG_TOML_FILE),
+            format!(
+                r#"
+[code_search]
+enabled = true
+auto_detect = true
+auto_install = false
+
+[projects."{workspace_key}"]
+trust_level = "trusted"
+"#,
+            ),
+        )?;
+        let project_config_dir = workspace.path().join(".codex");
+        std::fs::create_dir_all(&project_config_dir)?;
+        std::fs::write(
+            project_config_dir.join(CONFIG_TOML_FILE),
+            r#"
+[code_search]
+auto_detect = false
+"#,
+        )?;
+
+        let config = ConfigBuilder::default()
+            .codex_home(codex_home.path().to_path_buf())
+            .harness_overrides(ConfigOverrides {
+                cwd: Some(workspace.path().to_path_buf()),
+                ..Default::default()
+            })
+            .build()
+            .await?;
+
+        assert_eq!(
+            config.code_search,
+            CodeSearchConfig {
+                enabled: true,
+                auto_detect: false,
+                auto_install: false,
+                lsp: BTreeMap::new(),
+            }
+        );
 
         Ok(())
     }
@@ -5277,6 +5422,7 @@ model_verbosity = "high"
                 agent_max_threads: DEFAULT_AGENT_MAX_THREADS,
                 agent_max_depth: DEFAULT_AGENT_MAX_DEPTH,
                 agent_roles: BTreeMap::new(),
+                code_search: CodeSearchConfig::default(),
                 memories: MemoriesConfig::default(),
                 agent_job_max_runtime_seconds: DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS,
                 codex_home: fixture.codex_home(),
@@ -5415,6 +5561,7 @@ model_verbosity = "high"
             agent_max_threads: DEFAULT_AGENT_MAX_THREADS,
             agent_max_depth: DEFAULT_AGENT_MAX_DEPTH,
             agent_roles: BTreeMap::new(),
+            code_search: CodeSearchConfig::default(),
             memories: MemoriesConfig::default(),
             agent_job_max_runtime_seconds: DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS,
             codex_home: fixture.codex_home(),
@@ -5551,6 +5698,7 @@ model_verbosity = "high"
             agent_max_threads: DEFAULT_AGENT_MAX_THREADS,
             agent_max_depth: DEFAULT_AGENT_MAX_DEPTH,
             agent_roles: BTreeMap::new(),
+            code_search: CodeSearchConfig::default(),
             memories: MemoriesConfig::default(),
             agent_job_max_runtime_seconds: DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS,
             codex_home: fixture.codex_home(),
@@ -5673,6 +5821,7 @@ model_verbosity = "high"
             agent_max_threads: DEFAULT_AGENT_MAX_THREADS,
             agent_max_depth: DEFAULT_AGENT_MAX_DEPTH,
             agent_roles: BTreeMap::new(),
+            code_search: CodeSearchConfig::default(),
             memories: MemoriesConfig::default(),
             agent_job_max_runtime_seconds: DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS,
             codex_home: fixture.codex_home(),

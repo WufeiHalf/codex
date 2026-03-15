@@ -1,5 +1,6 @@
 pub(crate) mod agent_jobs;
 pub mod apply_patch;
+mod code_search;
 mod cron;
 mod dynamic;
 mod grep_files;
@@ -33,6 +34,11 @@ use crate::sandboxing::SandboxPermissions;
 use crate::sandboxing::merge_permission_profiles;
 use crate::sandboxing::normalize_additional_permissions;
 pub use apply_patch::ApplyPatchHandler;
+pub(crate) use code_search::FIND_CODE_SYMBOLS_TOOL_NAME;
+pub(crate) use code_search::FIND_DEFINITIONS_TOOL_NAME;
+pub(crate) use code_search::FIND_DOCUMENT_SYMBOLS_TOOL_NAME;
+pub(crate) use code_search::FIND_REFERENCES_TOOL_NAME;
+pub use code_search::InternalCodeSearchHandler;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::AskForApproval;
 pub(crate) use cron::CRON_CREATE_TOOL_NAME;

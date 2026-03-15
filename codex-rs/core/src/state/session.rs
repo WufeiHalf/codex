@@ -33,6 +33,7 @@ pub(crate) struct SessionState {
     pub(crate) server_reasoning_included: bool,
     pub(crate) dependency_env: HashMap<String, String>,
     pub(crate) mcp_dependency_prompted: HashSet<String>,
+    pub(crate) code_search_notified: HashSet<String>,
     /// Settings used by the latest regular user turn, used for turn-to-turn
     /// model/realtime handling on subsequent regular turns (including full-context
     /// reinjection after resume or `/compact`).
@@ -56,6 +57,7 @@ impl SessionState {
             server_reasoning_included: false,
             dependency_env: HashMap::new(),
             mcp_dependency_prompted: HashSet::new(),
+            code_search_notified: HashSet::new(),
             previous_turn_settings: None,
             startup_regular_task: None,
             active_mcp_tool_selection: None,
@@ -162,6 +164,17 @@ impl SessionState {
 
     pub(crate) fn mcp_dependency_prompted(&self) -> HashSet<String> {
         self.mcp_dependency_prompted.clone()
+    }
+
+    pub(crate) fn record_code_search_notified<I>(&mut self, keys: I)
+    where
+        I: IntoIterator<Item = String>,
+    {
+        self.code_search_notified.extend(keys);
+    }
+
+    pub(crate) fn code_search_notified(&self) -> HashSet<String> {
+        self.code_search_notified.clone()
     }
 
     pub(crate) fn set_dependency_env(&mut self, values: HashMap<String, String>) {

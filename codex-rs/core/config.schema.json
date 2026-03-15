@@ -284,6 +284,46 @@
         }
       ]
     },
+    "CodeSearchLanguageServerToml": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "description": "Full argv used to spawn the language server for this language.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "CodeSearchToml": {
+      "additionalProperties": false,
+      "description": "Code search settings loaded from config.toml.",
+      "properties": {
+        "auto_detect": {
+          "description": "When `true`, Codex attempts built-in language-server auto-detection for supported languages when no explicit command is configured.",
+          "type": "boolean"
+        },
+        "auto_install": {
+          "description": "When `true`, Codex attempts on-demand installation for supported language servers after explicit, managed, and PATH-visible commands have been exhausted.",
+          "type": "boolean"
+        },
+        "enabled": {
+          "description": "When `false`, disables internal code search runtime behavior even when the experimental feature flag is enabled.",
+          "type": "boolean"
+        },
+        "lsp": {
+          "additionalProperties": {
+            "$ref": "#/definitions/CodeSearchLanguageServerToml"
+          },
+          "default": {},
+          "description": "Per-language language-server startup overrides.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "ConfigProfile": {
       "additionalProperties": false,
       "description": "Collection of common configuration options that a user can define as a unit in `config.toml`.",
@@ -372,6 +412,9 @@
               "type": "boolean"
             },
             "include_apply_patch_tool": {
+              "type": "boolean"
+            },
+            "internal_code_search": {
               "type": "boolean"
             },
             "js_repl": {
@@ -1840,6 +1883,15 @@
       "default": null,
       "description": "Preferred backend for storing CLI auth credentials. file (default): Use a file in the Codex home directory. keyring: Use an OS-specific keyring service. auto: Use the keyring if available, otherwise use a file."
     },
+    "code_search": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/CodeSearchToml"
+        }
+      ],
+      "default": null,
+      "description": "Internal code search runtime settings."
+    },
     "commit_attribution": {
       "description": "Optional commit attribution text for commit message co-author trailers.\n\nSet to an empty string to disable automatic commit attribution.",
       "type": "string"
@@ -1953,6 +2005,9 @@
           "type": "boolean"
         },
         "include_apply_patch_tool": {
+          "type": "boolean"
+        },
+        "internal_code_search": {
           "type": "boolean"
         },
         "js_repl": {

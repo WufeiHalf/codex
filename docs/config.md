@@ -102,6 +102,54 @@ Codex can connect to MCP servers configured in `~/.codex/config.toml`. See the c
 
 - https://developers.openai.com/codex/config-reference
 
+## Internal code search
+
+The experimental `internal_code_search` feature exposes structured code-navigation tools and app-server RPCs. Runtime behavior stays under `[code_search]` in `config.toml`:
+
+```toml
+[features]
+internal_code_search = true
+
+[code_search]
+enabled = true
+auto_detect = true
+auto_install = false
+
+[code_search.lsp.rust]
+command = ["rust-analyzer"]
+```
+
+Resolution order is:
+
+1. `[code_search.lsp.<language>].command`
+2. Codex-managed installed server path under `CODEX_HOME/lsp`
+3. PATH-visible default command when `auto_detect = true`
+4. On-demand installation when `auto_install = true`
+5. Built-in fallback search
+
+Notes:
+
+- `auto_install` is opt-in. When enabled, Codex can install supported language servers for Rust, Go, JavaScript, TypeScript, and Python into `CODEX_HOME` when no explicit, managed, or PATH-visible server is available.
+- A broken explicit `command` remains authoritative for that lookup: Codex warns and falls back instead of silently replacing it.
+- Successful LSP lookups are intentionally quiet; fallback, install, and runtime failures surface through warnings and provenance metadata instead.
+- `auto_install` covers the language server package plus known runtime package dependencies that the server needs after install. It does not bootstrap missing host package managers themselves: Rust still requires `rustup`, Go still requires `go`, and JavaScript, TypeScript, and Python currently require `npm` on the host.
+
+Auto-install matrix:
+
+| Language | Managed command under `CODEX_HOME` | Install command | Extra dependency Codex installs | Source and proxy controls |
+| --- | --- | --- | --- | --- |
+| Rust | `lsp/bin/rust-analyzer` | `rustup component add rust-analyzer rust-src` | `rust-src` | `rustup` controls the download source. Mirrors and proxies follow normal `rustup` settings such as `RUSTUP_DIST_SERVER`, `RUSTUP_UPDATE_ROOT`, and standard proxy env vars like `HTTPS_PROXY`, `HTTP_PROXY`, and `ALL_PROXY`. |
+| Go | `lsp/bin/gopls` | `GOBIN=$CODEX_HOME/lsp/bin go install golang.org/x/tools/gopls@latest` | none beyond `gopls` | `go install` follows Go module settings such as `GOPROXY`, `GONOPROXY`, `GOPRIVATE`, `GONOSUMDB`, and `GOSUMDB`, plus standard proxy env vars when the Go toolchain uses them. |
+| JavaScript | `lsp/npm/node_modules/.bin/typescript-language-server --stdio` | `npm install --prefix $CODEX_HOME/lsp/npm typescript typescript-language-server` | `typescript` | `npm` controls the registry and proxy path. It follows npm config such as `registry`, `proxy`, and `https-proxy`, plus environment variables like `NPM_CONFIG_REGISTRY`, `HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY`. |
+| TypeScript | `lsp/npm/node_modules/.bin/typescript-language-server --stdio` | `npm install --prefix $CODEX_HOME/lsp/npm typescript typescript-language-server` | `typescript` | Same npm registry and proxy behavior as JavaScript. |
+| Python | `lsp/npm/node_modules/.bin/pyright-langserver --stdio` | `npm install --prefix $CODEX_HOME/lsp/npm pyright` | none beyond `pyright` | Python code search currently uses the Node-distributed `pyright-langserver`, so it follows the same npm registry and proxy settings as JavaScript and TypeScript rather than `pip`. |
+
+Codex forwards the current process environment to these installers. That means:
+
+- registry and mirror selection stay with the native package manager instead of Codex adding a second source-selection layer
+- proxy changes should usually be made in the package manager config or the standard environment variables that package manager already honors
+- if a machine needs a custom internal mirror, set it where `rustup`, `go`, or `npm` already expects it and Codex auto-install will inherit that behavior
+
 ## Apps (Connectors)
 
 Use `$` in the composer to insert a ChatGPT connector; the popover lists accessible

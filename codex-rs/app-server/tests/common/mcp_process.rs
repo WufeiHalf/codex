@@ -15,6 +15,10 @@ use codex_app_server_protocol::AppsListParams;
 use codex_app_server_protocol::CancelLoginAccountParams;
 use codex_app_server_protocol::ClientInfo;
 use codex_app_server_protocol::ClientNotification;
+use codex_app_server_protocol::CodeSearchDefinitionParams;
+use codex_app_server_protocol::CodeSearchDocumentSymbolParams;
+use codex_app_server_protocol::CodeSearchReferencesParams;
+use codex_app_server_protocol::CodeSearchSymbolParams;
 use codex_app_server_protocol::CollaborationModeListParams;
 use codex_app_server_protocol::CommandExecParams;
 use codex_app_server_protocol::CommandExecResizeParams;
@@ -435,6 +439,42 @@ impl McpProcess {
     pub async fn send_apps_list_request(&mut self, params: AppsListParams) -> anyhow::Result<i64> {
         let params = Some(serde_json::to_value(params)?);
         self.send_request("app/list", params).await
+    }
+
+    /// Send a `codeSearch/symbol` JSON-RPC request.
+    pub async fn send_code_search_symbol_request(
+        &mut self,
+        params: CodeSearchSymbolParams,
+    ) -> anyhow::Result<i64> {
+        let params = Some(serde_json::to_value(params)?);
+        self.send_request("codeSearch/symbol", params).await
+    }
+
+    /// Send a `codeSearch/definition` JSON-RPC request.
+    pub async fn send_code_search_definition_request(
+        &mut self,
+        params: CodeSearchDefinitionParams,
+    ) -> anyhow::Result<i64> {
+        let params = Some(serde_json::to_value(params)?);
+        self.send_request("codeSearch/definition", params).await
+    }
+
+    /// Send a `codeSearch/references` JSON-RPC request.
+    pub async fn send_code_search_references_request(
+        &mut self,
+        params: CodeSearchReferencesParams,
+    ) -> anyhow::Result<i64> {
+        let params = Some(serde_json::to_value(params)?);
+        self.send_request("codeSearch/references", params).await
+    }
+
+    /// Send a `codeSearch/documentSymbol` JSON-RPC request.
+    pub async fn send_code_search_document_symbol_request(
+        &mut self,
+        params: CodeSearchDocumentSymbolParams,
+    ) -> anyhow::Result<i64> {
+        let params = Some(serde_json::to_value(params)?);
+        self.send_request("codeSearch/documentSymbol", params).await
     }
 
     /// Send a `skills/list` JSON-RPC request.
