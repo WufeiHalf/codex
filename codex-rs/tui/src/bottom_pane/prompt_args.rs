@@ -244,6 +244,40 @@ pub fn expand_custom_prompt(
         }));
     }
 
+    // For prompts without placeholders, preserve any free-form user input by
+    // appending it after the preset body instead of discarding it.
+    let args_start_in_rest = rest.len() - rest.trim_start().len();
+    let args_str = rest.trim_start().trim_end();
+    if !args_str.is_empty() && !prompt_has_numeric_placeholders(&prompt.content) {
+        let args_offset = args_start_in_rest;
+        let mut appended_elements: Vec<TextElement> = local_elements
+            .iter()
+            .filter_map(|elem| {
+                let mut shifted = shift_text_element_left(elem, args_offset)?;
+                if shifted.byte_range.start >= args_str.len() {
+                    return None;
+                }
+                let end = shifted.byte_range.end.min(args_str.len());
+                shifted.byte_range.end = end;
+                (shifted.byte_range.start < shifted.byte_range.end).then_some(shifted)
+            })
+            .collect();
+        let mut expanded = prompt.content.trim_end().to_string();
+        if !expanded.is_empty() {
+            expanded.push_str("\n\n");
+        }
+        let appended_start = expanded.len();
+        expanded.push_str(args_str);
+        appended_elements.iter_mut().for_each(|elem| {
+            elem.byte_range.start += appended_start;
+            elem.byte_range.end += appended_start;
+        });
+        return Ok(Some(PromptExpansion {
+            text: expanded,
+            text_elements: appended_elements,
+        }));
+    }
+
     // Otherwise, treat it as numeric/positional placeholder prompt (or none).
     let pos_args = parse_positional_args(rest, &local_elements);
     Ok(Some(expand_numeric_placeholders(

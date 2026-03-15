@@ -6,6 +6,53 @@ For advanced configuration instructions, see [this documentation](https://develo
 
 For a full configuration reference, see [this documentation](https://developers.openai.com/codex/config-reference).
 
+## Native agent role presets
+
+Codex currently ships three built-in agent roles:
+
+- `default`
+- `explorer`
+- `worker`
+
+The supported custom preset format is native Codex config:
+
+1. Declare the role under `[agents.<role>]` in `~/.codex/config.toml`.
+2. Point `config_file` at a TOML role file, usually under `~/.codex/agents/`.
+3. Optionally add `description` and `nickname_candidates`.
+
+Example declaration in `~/.codex/config.toml`:
+
+```toml
+[agents.reviewer]
+description = "Review code for regressions, edge cases, and missing tests."
+config_file = "./agents/reviewer.toml"
+nickname_candidates = ["Noether", "Sagan"]
+```
+
+Example role file at `~/.codex/agents/reviewer.toml`:
+
+```toml
+model_reasoning_effort = "high"
+
+developer_instructions = """
+You are a review specialist.
+Focus on bugs, regressions, risky assumptions, and missing tests.
+Present findings before summaries.
+"""
+```
+
+Notes:
+
+- Role files use the same config schema as `config.toml`; keep only the overrides you want for that role.
+- Relative `config_file` paths are resolved relative to the `config.toml` that declared the role.
+- If `config_file` points to a missing path or a directory, Codex rejects the role configuration.
+- `nickname_candidates` are optional, but when present they must be non-empty, unique, and ASCII-safe.
+- Built-in roles do not need declarations in `config.toml`.
+
+Legacy `~/.codex/agents/*.md` files are migration input only in this fork. They are not active runtime presets and are not loaded by name. To activate a migrated role, create a TOML role file and add the matching `[agents.<role>]` declaration.
+
+Starter examples live in [`docs/examples/agent-role-presets/`](./examples/agent-role-presets/README.md).
+
 ## Custom model providers
 
 You can define custom providers in `~/.codex/config.toml` and select them via `model_provider`.
@@ -23,7 +70,15 @@ model_provider = "anthropic"
 model = "claude-sonnet-4-5"
 ```
 
-You can also set provider overrides inside agent role config files (for example `~/.codex/agents/researcher.toml`):
+You can also set provider overrides inside a role's TOML config file. First declare the role in `~/.codex/config.toml`:
+
+```toml
+[agents.researcher]
+description = "Research-focused role."
+config_file = "./agents/researcher.toml"
+```
+
+Then add the provider override in `~/.codex/agents/researcher.toml`:
 
 ```toml
 model_provider = "anthropic"

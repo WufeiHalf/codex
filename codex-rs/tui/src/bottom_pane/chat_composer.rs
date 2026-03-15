@@ -8198,6 +8198,43 @@ mod tests {
     }
 
     #[test]
+    fn custom_prompt_without_placeholders_appends_user_input() {
+        let prompt_text = "Hello from saved prompt";
+
+        let (tx, _rx) = unbounded_channel::<AppEvent>();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(
+            true,
+            sender,
+            false,
+            "Ask Codex to do anything".to_string(),
+            false,
+        );
+
+        composer.set_custom_prompts(vec![CustomPrompt {
+            name: "my-prompt".to_string(),
+            path: "/tmp/my-prompt.md".to_string().into(),
+            content: prompt_text.to_string(),
+            description: None,
+            argument_hint: None,
+        }]);
+
+        composer
+            .textarea
+            .set_text_clearing_elements("/prompts:my-prompt investigate this module");
+
+        let (result, _needs_redraw) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result,
+            InputResult::Submitted { text, .. }
+                if text == "Hello from saved prompt\n\ninvestigate this module"
+        ));
+        assert!(composer.textarea.is_empty());
+    }
+
+    #[test]
     fn custom_prompt_submission_expands_arguments() {
         let (tx, _rx) = unbounded_channel::<AppEvent>();
         let sender = AppEventSender::new(tx);

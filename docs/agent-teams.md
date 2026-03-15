@@ -2,6 +2,19 @@
 
 This note summarizes the current in-process Agent Teams workflow implemented by Codex multi-agent tools.
 
+## Agent types
+
+Each team member's `agent_type` is a role name.
+
+- Built-in roles: `default`, `explorer`, `worker`
+- Custom roles: declare them in `~/.codex/config.toml` under `[agents.<role>]` and point `config_file` at a TOML role file
+
+There is no separate team-preset DSL. Teams are still composed member-by-member in the `spawn_team` payload, and custom roles are reused by name through `agent_type`.
+
+Legacy `~/.codex/agents/*.md` files are migration input only. They are not active runtime roles until you convert them into `[agents.<role>]` declarations plus `~/.codex/agents/*.toml` files.
+
+Starter custom roles and composition examples live in [`docs/examples/agent-role-presets/`](./examples/agent-role-presets/README.md).
+
 ## Team lifecycle
 
 1. Create a team:
@@ -11,13 +24,17 @@ This note summarizes the current in-process Agent Teams workflow implemented by 
   "team_id": "my-team",
   "members": [
     {
-      "name": "planner",
-      "task": "Plan the work",
-      "agent_type": "architect",
-      "worktree": true,
+      "name": "scout",
+      "task": "Find the relevant files, APIs, and constraints",
+      "agent_type": "explorer",
       "background": true
     },
-    { "name": "worker", "task": "Implement the plan", "agent_type": "develop" }
+    {
+      "name": "builder",
+      "task": "Implement the approved change in the owned files only",
+      "agent_type": "worker",
+      "worktree": true
+    }
   ]
 }
 ```
@@ -88,7 +105,8 @@ These tools accept either `message` or `items` (not both), and optional `interru
 > Notes:
 >
 > - `team_id` is explicitly set for deterministic follow-up calls.
-> - `agent_type` can be built-in roles (for example `architect`, `develop`, `code-review`) or custom roles from your config.
+> - `agent_type` can be a built-in role (`default`, `explorer`, `worker`) or a custom role declared under `[agents.<role>]`.
+> - The `planner`, `implementer`, and `reviewer` role names below are custom native presets from `docs/examples/agent-role-presets/`; they are examples, not additional built-ins.
 > - `worktree` (optional, default `false`) spawns that member in a dedicated git worktree.
 > - `background` (optional, default `false`) marks that member as background work (informational).
 > - IDs like `agent_id`, `task_id`, `submission_id` are runtime values.
@@ -104,17 +122,17 @@ Request:
     {
       "name": "planner",
       "task": "Define rollout plan",
-      "agent_type": "architect"
+      "agent_type": "planner"
     },
     {
       "name": "implementer",
       "task": "Implement the changes",
-      "agent_type": "develop"
+      "agent_type": "implementer"
     },
     {
       "name": "reviewer",
       "task": "Review risks and edge cases",
-      "agent_type": "code-review"
+      "agent_type": "reviewer"
     }
   ]
 }

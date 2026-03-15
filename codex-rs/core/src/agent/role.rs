@@ -392,6 +392,149 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn docs_agent_role_presets_load_through_native_role_path() {
+        let example_dir =
+            codex_utils_cargo_bin::find_resource!("../../docs/examples/agent-role-presets")
+                .expect("resolve agent role preset examples");
+        let home = TempDir::new().expect("create temp dir");
+        let agents_dir = home.path().join("agents");
+        fs::create_dir_all(&agents_dir).expect("create agents dir");
+        fs::copy(
+            example_dir.join("config.toml"),
+            home.path().join(CONFIG_TOML_FILE),
+        )
+        .expect("copy preset config");
+        for role_name in ["planner", "implementer", "reviewer", "debugger", "docs"] {
+            fs::copy(
+                example_dir.join("agents").join(format!("{role_name}.toml")),
+                agents_dir.join(format!("{role_name}.toml")),
+            )
+            .expect("copy preset role config");
+        }
+
+        let config = ConfigBuilder::default()
+            .codex_home(home.path().to_path_buf())
+            .fallback_cwd(Some(home.path().to_path_buf()))
+            .build()
+            .await
+            .expect("load preset config");
+
+        assert_eq!(
+            config.agent_roles,
+            BTreeMap::from([
+                (
+                    "debugger".to_string(),
+                    AgentRoleConfig {
+                        description: Some(
+                            "Debugging role for reproducing failures and isolating root causes."
+                                .to_string()
+                        ),
+                        config_file: Some(agents_dir.join("debugger.toml")),
+                        nickname_candidates: Some(vec![
+                            "Tracer".to_string(),
+                            "Reducer".to_string(),
+                        ]),
+                    }
+                ),
+                (
+                    "docs".to_string(),
+                    AgentRoleConfig {
+                        description: Some(
+                            "Documentation role for operator guidance, examples, and migration notes."
+                                .to_string()
+                        ),
+                        config_file: Some(agents_dir.join("docs.toml")),
+                        nickname_candidates: Some(vec![
+                            "Writer".to_string(),
+                            "Editor".to_string(),
+                        ]),
+                    }
+                ),
+                (
+                    "implementer".to_string(),
+                    AgentRoleConfig {
+                        description: Some("Scoped code-change role for bounded ownership.".to_string()),
+                        config_file: Some(agents_dir.join("implementer.toml")),
+                        nickname_candidates: Some(vec![
+                            "Builder".to_string(),
+                            "Fixer".to_string(),
+                        ]),
+                    }
+                ),
+                (
+                    "planner".to_string(),
+                    AgentRoleConfig {
+                        description: Some(
+                            "Planning-first role for decomposition, rollout order, and handoff quality."
+                                .to_string()
+                        ),
+                        config_file: Some(agents_dir.join("planner.toml")),
+                        nickname_candidates: Some(vec![
+                            "Planner".to_string(),
+                            "Mapper".to_string(),
+                        ]),
+                    }
+                ),
+                (
+                    "reviewer".to_string(),
+                    AgentRoleConfig {
+                        description: Some(
+                            "Review role for bugs, regressions, and missing tests.".to_string()
+                        ),
+                        config_file: Some(agents_dir.join("reviewer.toml")),
+                        nickname_candidates: Some(vec![
+                            "Noether".to_string(),
+                            "Sagan".to_string(),
+                        ]),
+                    }
+                ),
+            ])
+        );
+
+        for (role_name, expected_effort, expected_instruction) in [
+            (
+                "planner",
+                ReasoningEffort::High,
+                "assign file or module ownership when work will be delegated",
+            ),
+            (
+                "implementer",
+                ReasoningEffort::Medium,
+                "make the requested change in the assigned files only",
+            ),
+            (
+                "reviewer",
+                ReasoningEffort::High,
+                "present findings before summaries",
+            ),
+            (
+                "debugger",
+                ReasoningEffort::High,
+                "preserve failing evidence until the cause is clear",
+            ),
+            (
+                "docs",
+                ReasoningEffort::Medium,
+                "do not invent unsupported APIs, flags, or config keys",
+            ),
+        ] {
+            let mut role_config = config.clone();
+
+            apply_role_to_config(&mut role_config, Some(role_name))
+                .await
+                .expect("example role should apply");
+
+            assert_eq!(role_config.model_reasoning_effort, Some(expected_effort));
+            assert!(
+                role_config
+                    .developer_instructions
+                    .as_deref()
+                    .is_some_and(|instructions| instructions.contains(expected_instruction))
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn apply_role_preserves_unspecified_keys() {
         let (home, mut config) = test_config_with_cli_overrides(vec![(
             "model".to_string(),

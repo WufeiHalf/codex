@@ -1,0 +1,27 @@
+# Copy these declarations into ~/.codex/config.toml.
+# Paths resolve relative to the config.toml that declares them.
+
+[agents.planner]
+description = "Planning-first role for decomposition, rollout order, and handoff quality."
+config_file = "./agents/planner.toml"
+nickname_candidates = ["Planner", "Mapper"]
+
+[agents.implementer]
+description = "Scoped code-change role for bounded ownership."
+config_file = "./agents/implementer.toml"
+nickname_candidates = ["Builder", "Fixer"]
+
+[agents.reviewer]
+description = "Review role for bugs, regressions, and missing tests."
+config_file = "./agents/reviewer.toml"
+nickname_candidates = ["Noether", "Sagan"]
+
+[agents.debugger]
+description = "Debugging role for reproducing failures and isolating root causes."
+config_file = "./agents/debugger.toml"
+nickname_candidates = ["Tracer", "Reducer"]
+
+[agents.docs]
+description = "Documentation role for operator guidance, examples, and migration notes."
+config_file = "./agents/docs.toml"
+nickname_candidates = ["Writer", "Editor"]
